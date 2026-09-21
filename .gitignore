@@ -1,0 +1,53 @@
+# 依赖
+/node_modules
+
+# Next.js 产物
+/.next
+/out
+/build
+next-env.d.ts
+
+# TypeScript 增量编译缓存。每次 tsc 都会变，进 git 就是纯噪音
+*.tsbuildinfo
+
+# 构建与发版产物
+/releases
+/dist
+*.tar.gz
+
+# 环境变量与密钥 —— 绝对不能进仓库
+.env
+.env.*
+!.env.example
+deploy/blog.env
+deploy.config.json
+
+# ══ 内容整个不进仓库 ══
+#
+# 这个仓库只放**代码**。文章、说说、杂谈、评论、相册、歌单、站点设置
+# 全都在 content/ 下，是站点运行时产生和编辑的数据，不是源码。
+#
+# 三个理由，按重要性排：
+#   1. settings.json 里有站长的邮箱 / QQ / 微信，公开仓库比公开网页好爬得多
+#   2. 上传的图片是 1.9GB 的二进制，git 存不好大文件，仓库会膨胀得没法看
+#   3. stats.db 是**活着的** SQLite，-wal / -shm 在应用运行时随时在变，
+#      进 git 就是每次提交都产生一堆二进制 diff
+#
+# 内容的备份走 `npm run backup`（服务器 → 本机），不靠 git。
+# 本地开发时 content/ 不存在也没关系：读不到会回落到代码里的默认值。
+/content
+
+# 备份归档
+/backups
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+*.swp
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# 日志
+npm-debug.log*
+*.log

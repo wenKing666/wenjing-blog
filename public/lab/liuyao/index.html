@@ -1,0 +1,1910 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>六爻问卦 · 玄机</title>
+<style>
+/* ============ 基础 ============ */
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+
+:root{
+  --ink:#2a2521;
+  --ink-soft:#4a4038;
+  --ink-fade:#8a7c68;
+  --cinnabar:#9e2b25;
+  --cinnabar-lt:#b8472f;
+  --gold:#a8863c;
+  --paper:#e9dcc1;
+  --bronze:#5c7a63;
+  --bronze-dark:#3d5245;
+  --bronze-light:#8aa891;
+
+  /* 加载动画尺寸 */
+  --loader-size: min(290px, 80vw);
+  --gua-radius:  min(98px, 28vw);
+  --gua-size:    min(36px, 10vw);
+  --taiji-size:  min(80px, 22vw);
+}
+
+html{scroll-behavior:smooth}
+
+body{
+  font-family:"Kaiti SC","STKaiti","KaiTi","楷体","Songti SC","STSong",serif;
+  color:var(--ink);
+  min-height:100vh;
+  overflow-x:hidden;
+  position:relative;
+  -webkit-font-smoothing:antialiased;
+}
+body.loading{overflow:hidden}
+
+/* ============ 小篆字体 ============ */
+.fnt-seal{
+  font-family:"方正小篆体","FZXiaoZhuanTi","汉仪篆书繁","STXiaozhuan",
+              "华文篆书","AaXiaoZhuanTi","Kaiti SC","STKaiti","KaiTi",serif;
+  font-weight:normal;
+}
+
+/* ============ 宣纸底 ============ */
+body::before{
+  content:'';position:fixed;inset:0;z-index:-4;
+  background:
+    radial-gradient(ellipse 90% 65% at 18% 8%, rgba(255,253,246,.95), transparent 72%),
+    radial-gradient(ellipse 75% 55% at 88% 78%, rgba(212,193,155,.55), transparent 72%),
+    radial-gradient(ellipse 60% 45% at 6% 92%, rgba(198,177,136,.45), transparent 72%),
+    linear-gradient(158deg,#f4ecd9 0%,#ece0c6 38%,#e4d5b5 72%,#dccba8 100%);
+}
+
+body::after{
+  content:'';position:fixed;inset:0;z-index:-3;pointer-events:none;
+  opacity:.42;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+}
+
+.vignette{
+  position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background:radial-gradient(ellipse 78% 72% at 50% 46%, transparent 42%, rgba(140,116,80,.13) 100%);
+}
+
+/* ============================================================
+   加载动画 —— 太极旋转 + 八卦环绕
+   ============================================================ */
+.loader{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  overflow:hidden;
+  background:
+    radial-gradient(ellipse 90% 65% at 18% 8%, rgba(255,253,246,.95), transparent 72%),
+    radial-gradient(ellipse 75% 55% at 88% 78%, rgba(212,193,155,.55), transparent 72%),
+    radial-gradient(ellipse 60% 45% at 6% 92%, rgba(198,177,136,.45), transparent 72%),
+    linear-gradient(158deg,#f4ecd9 0%,#ece0c6 38%,#e4d5b5 72%,#dccba8 100%);
+  transition:
+    opacity 1s cubic-bezier(.22,1,.36,1),
+    visibility 1s;
+}
+.loader::after{
+  content:'';
+  position:absolute;inset:0;
+  opacity:.42;mix-blend-mode:multiply;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+}
+.loader.done{
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+}
+
+.loader-center{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  width:var(--loader-size);
+  height:var(--loader-size);
+}
+
+.loader-wheel{
+  width:100%;
+  height:100%;
+  position:relative;
+  animation:wheelSpin 24s linear infinite;
+  animation-delay:2.8s;
+  will-change:transform;
+}
+@keyframes wheelSpin{
+  to{transform:rotate(360deg)}
+}
+
+/* --- 八卦容器 --- */
+.bagua{
+  position:absolute;
+  inset:0;
+}
+
+/* --- 单个卦象 --- */
+.gua{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:var(--gua-size);
+  height:var(--gua-size);
+  margin-top:calc(var(--gua-size) * -0.5);
+  margin-left:calc(var(--gua-size) * -0.5);
+  display:grid;
+  place-items:center;
+  font-size:calc(var(--gua-size) * 0.86);
+  line-height:1;
+  color:#2a2521;
+  text-shadow:0 2px 10px rgba(120,98,64,.22);
+  opacity:0;
+  transform:translate(0px, 0px) scale(0.2);
+  transition:
+    transform 1.05s cubic-bezier(.22,1,.36,1),
+    opacity 0.85s ease;
+  will-change:transform,opacity;
+}
+.gua.in{
+  opacity:1;
+  transform:translate(var(--tx, 0px), var(--ty, 0px)) scale(1);
+}
+
+/* --- 太极 --- */
+.taiji-wrap{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:var(--taiji-size);
+  height:var(--taiji-size);
+  margin-top:calc(var(--taiji-size) * -0.5);
+  margin-left:calc(var(--taiji-size) * -0.5);
+  opacity:0;
+  transform:scale(0.2) rotate(-120deg);
+  transition:
+    transform 1s cubic-bezier(.22,1,.36,1),
+    opacity 0.9s ease;
+  transition-delay:0.35s;
+  will-change:transform,opacity;
+}
+.taiji-wrap.in{
+  opacity:1;
+  transform:scale(1) rotate(0deg);
+}
+
+.taiji{
+  width:100%;
+  height:100%;
+  border-radius:50%;
+  background:#f5edd9;
+  position:relative;
+  overflow:hidden;
+  animation:taijiSpin 5s linear infinite;
+  animation-delay:1.5s;
+  will-change:transform;
+  box-shadow:
+    0 0 0 1px rgba(42,37,33,.14),
+    0 0 36px rgba(168,134,60,.18),
+    0 14px 36px -14px rgba(120,98,64,.46);
+}
+@keyframes taijiSpin{
+  to{transform:rotate(360deg)}
+}
+
+.taiji-half{
+  position:absolute;
+  left:0;top:0;
+  width:50%;height:100%;
+  background:#2a2521;
+}
+.taiji-dot-top{
+  position:absolute;
+  left:50%;top:0;
+  width:50%;height:50%;
+  transform:translateX(-50%);
+  border-radius:50%;
+  background:#2a2521;
+}
+.taiji-dot-top::after{
+  content:'';
+  position:absolute;
+  left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  width:22%;height:22%;
+  border-radius:50%;
+  background:#f5edd9;
+}
+.taiji-dot-bot{
+  position:absolute;
+  left:50%;bottom:0;
+  width:50%;height:50%;
+  transform:translateX(-50%);
+  border-radius:50%;
+  background:#f5edd9;
+}
+.taiji-dot-bot::after{
+  content:'';
+  position:absolute;
+  left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  width:22%;height:22%;
+  border-radius:50%;
+  background:#2a2521;
+}
+
+/* --- 加载文字 --- */
+.loader-text{
+  position:absolute;
+  left:50%;
+  bottom:13vh;
+  transform:translateX(-50%);
+  font-size:15px;
+  letter-spacing:.62em;
+  text-indent:.62em;
+  color:rgba(120,100,70,.72);
+  white-space:nowrap;
+  opacity:0;
+  animation:textIn 1s cubic-bezier(.22,1,.36,1) 0.6s forwards;
+}
+@keyframes textIn{
+  to{opacity:1}
+}
+
+/* ============ 祥云 ============ */
+.cloud-layer{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+.cloud{position:absolute;left:0;top:0;will-change:transform;opacity:0}
+.cloud svg{display:block;width:100%;height:auto}
+
+@keyframes driftLTR{
+  0%  {transform:translate3d(-48vw,0,0) scale(var(--sc));opacity:0}
+  9%  {opacity:var(--op)}
+  48% {transform:translate3d(26vw,-34px,0) scale(var(--sc));opacity:var(--op)}
+  91% {opacity:var(--op)}
+  100%{transform:translate3d(112vw,16px,0) scale(var(--sc));opacity:0}
+}
+@keyframes driftRTL{
+  0%  {transform:translate3d(112vw,0,0) scale(var(--sc));opacity:0}
+  9%  {opacity:var(--op)}
+  52% {transform:translate3d(34vw,30px,0) scale(var(--sc));opacity:var(--op)}
+  91% {opacity:var(--op)}
+  100%{transform:translate3d(-48vw,-14px,0) scale(var(--sc));opacity:0}
+}
+
+.c1{top:7%; width:330px; --sc:1; --op:.55; animation:driftLTR 62s linear infinite; animation-delay:-4s}
+.c2{top:26%;width:210px; --sc:1; --op:.40; animation:driftRTL 78s linear infinite; animation-delay:-26s}
+.c3{top:52%;width:420px; --sc:1; --op:.34; animation:driftLTR 94s linear infinite; animation-delay:-52s}
+.c4{top:74%;width:250px; --sc:1; --op:.46; animation:driftRTL 68s linear infinite; animation-delay:-14s}
+.c5{top:41%;width:170px; --sc:1; --op:.30; animation:driftLTR 56s linear infinite; animation-delay:-33s}
+.c6{top:15%;width:280px; --sc:1; --op:.28; animation:driftRTL 88s linear infinite; animation-delay:-62s}
+.c7{top:88%;width:300px; --sc:1; --op:.32; animation:driftLTR 100s linear infinite; animation-delay:-70s}
+
+@media(max-width:700px){
+  .c3{width:260px}.c1{width:220px}.c6{width:190px}
+}
+
+/* ============ 布局 ============ */
+.wrap{
+  max-width:760px;
+  margin:0 auto;
+  padding:58px 24px 110px;
+  position:relative;
+  z-index:1;
+}
+
+/* ============ 标题 ============ */
+.masthead{
+  text-align:center;
+  margin-bottom:38px;
+  animation:softIn 1.4s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes softIn{
+  from{opacity:0;transform:translateY(24px);filter:blur(8px)}
+  to  {opacity:1;transform:translateY(0);filter:blur(0)}
+}
+
+.seal{
+  width:56px;height:56px;
+  margin:0 auto 22px;
+  border-radius:5px;
+  background:linear-gradient(150deg,#b03a2e,#8a1f18);
+  color:#f6ead2;
+  display:grid;place-items:center;
+  font-size:28px;
+  line-height:1;
+  box-shadow:0 8px 22px rgba(140,40,30,.28), inset 0 1px 0 rgba(255,255,255,.2);
+  animation:sealFloat 7s ease-in-out infinite;
+  position:relative;
+}
+.seal::after{
+  content:'';
+  position:absolute;inset:4px;
+  border:1px solid rgba(246,234,210,.35);
+  border-radius:2px;
+  pointer-events:none;
+}
+@keyframes sealFloat{
+  0%,100%{transform:translateY(0) rotate(-1.2deg)}
+  50%    {transform:translateY(-6px) rotate(1.2deg)}
+}
+
+.masthead h1{
+  font-size:clamp(30px,7vw,46px);
+  letter-spacing:.28em;
+  text-indent:.28em;
+  color:#241f1b;
+  text-shadow:0 2px 14px rgba(120,98,64,.22);
+  margin-bottom:20px;
+}
+
+.rule{
+  width:220px;height:1px;margin:0 auto 16px;
+  background:linear-gradient(90deg,transparent,rgba(120,100,70,.55),transparent);
+  position:relative;
+}
+.rule::after{
+  content:'❖';
+  position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  font-size:11px;
+  color:rgba(120,100,70,.62);
+  padding:0 8px;
+  line-height:1;
+}
+
+.sub{
+  font-size:14px;
+  letter-spacing:.24em;
+  text-indent:.24em;
+  color:var(--ink-fade);
+}
+
+/* ============ 青铜纹饰条 ============ */
+.bronze-strip{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:10px;
+  margin:0 auto 30px;
+  opacity:.55;
+}
+.bronze-strip span{
+  width:6px;height:6px;
+  border:1px solid var(--bronze);
+  transform:rotate(45deg);
+}
+.bronze-strip i{
+  width:52px;height:1px;
+  background:linear-gradient(90deg,transparent,var(--bronze),transparent);
+  display:block;
+}
+
+/* ============ Tab 导航 ============ */
+.tabs{
+  display:flex;
+  justify-content:center;
+  gap:6px;
+  margin-bottom:26px;
+  animation:softIn 1.4s cubic-bezier(.22,1,.36,1) .12s both;
+}
+
+.tab{
+  font-family:inherit;
+  font-size:16px;
+  letter-spacing:.2em;
+  text-indent:.2em;
+  padding:12px 26px;
+  color:var(--ink-fade);
+  background:rgba(255,252,244,.32);
+  border:1px solid rgba(120,100,70,.22);
+  border-bottom:2px solid transparent;
+  border-radius:10px 10px 0 0;
+  cursor:pointer;
+  position:relative;
+  transition:
+    color .5s cubic-bezier(.22,1,.36,1),
+    background .5s cubic-bezier(.22,1,.36,1),
+    border-color .5s cubic-bezier(.22,1,.36,1),
+    transform .5s cubic-bezier(.22,1,.36,1);
+}
+.tab:hover{color:var(--ink-soft);background:rgba(255,252,244,.62)}
+.tab.active{
+  color:var(--cinnabar);
+  background:rgba(255,250,240,.85);
+  border-color:rgba(158,43,37,.32);
+  border-bottom-color:var(--cinnabar);
+  transform:translateY(-2px);
+}
+
+/* ============ 面板 ============ */
+.panel{
+  background:rgba(255,252,244,.42);
+  border:1px solid rgba(120,100,70,.20);
+  border-radius:14px;
+  padding:34px 28px 38px;
+  backdrop-filter:blur(2px);
+  box-shadow:
+    0 2px 0 rgba(255,255,255,.5) inset,
+    0 18px 46px -22px rgba(110,88,56,.34);
+  animation:softIn 1.4s cubic-bezier(.22,1,.36,1) .18s both;
+}
+.panel[hidden]{display:none}
+
+.panel-title{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:15px;
+  letter-spacing:.2em;
+  color:var(--ink-soft);
+  margin-bottom:22px;
+}
+.panel-title span{
+  display:grid;place-items:center;
+  width:24px;height:24px;
+  border-radius:50%;
+  border:1px solid rgba(158,43,37,.45);
+  color:var(--cinnabar);
+  font-size:12px;
+  flex:none;
+}
+.panel-title + .panel-title{margin-top:38px}
+
+/* ============ 分类 ============ */
+.cats{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:10px;
+}
+@media(max-width:620px){
+  .cats{grid-template-columns:repeat(3,1fr);gap:12px}
+}
+
+.cat{
+  font-family:inherit;
+  font-size:16px;
+  letter-spacing:.14em;
+  text-indent:.14em;
+  padding:16px 4px;
+  color:var(--ink-soft);
+  background:rgba(255,250,238,.5);
+  border:1px solid rgba(120,100,70,.26);
+  border-radius:10px;
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+  transition:
+    background .55s cubic-bezier(.22,1,.36,1),
+    border-color .55s cubic-bezier(.22,1,.36,1),
+    color .45s ease,
+    transform .55s cubic-bezier(.22,1,.36,1),
+    box-shadow .55s cubic-bezier(.22,1,.36,1);
+}
+.cat::after{
+  content:'';
+  position:absolute;inset:0;
+  background:radial-gradient(circle at 50% 120%, rgba(158,43,37,.16), transparent 68%);
+  opacity:0;
+  transition:opacity .6s ease;
+}
+.cat:hover{
+  background:rgba(255,252,244,.92);
+  border-color:rgba(158,43,37,.42);
+  transform:translateY(-3px);
+  box-shadow:0 10px 24px -10px rgba(110,88,56,.5);
+}
+.cat:hover::after{opacity:1}
+.cat.active{
+  color:var(--cinnabar);
+  border-color:rgba(158,43,37,.75);
+  background:rgba(255,246,238,.85);
+  box-shadow:
+    0 0 0 1px rgba(158,43,37,.16),
+    0 12px 30px -14px rgba(158,43,37,.55);
+}
+.cat.active::after{opacity:1}
+
+@keyframes shakeX{
+  0%,100%{transform:translateX(0)}
+  18%{transform:translateX(-9px)}
+  36%{transform:translateX(8px)}
+  54%{transform:translateX(-6px)}
+  72%{transform:translateX(4px)}
+  88%{transform:translateX(-2px)}
+}
+.shake{animation:shakeX .62s cubic-bezier(.36,.07,.19,.97)}
+
+/* ============ 起卦按钮 ============ */
+.cast-area{text-align:center;margin-top:8px}
+
+.cast-btn{
+  font-family:inherit;
+  font-size:19px;
+  letter-spacing:.42em;
+  text-indent:.42em;
+  padding:18px 52px;
+  color:#f8efdb;
+  background:linear-gradient(158deg,#a8321e 0%,#8d2418 52%,#701a11 100%);
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+  box-shadow:
+    0 14px 34px -12px rgba(125,32,22,.68),
+    inset 0 1px 0 rgba(255,255,255,.22),
+    inset 0 -2px 6px rgba(0,0,0,.22);
+  transition:
+    transform .55s cubic-bezier(.22,1,.36,1),
+    box-shadow .55s cubic-bezier(.22,1,.36,1),
+    filter .4s ease;
+}
+.cast-btn::before{
+  content:'';
+  position:absolute;top:0;left:-70%;
+  width:55%;height:100%;
+  background:linear-gradient(100deg,transparent,rgba(255,255,255,.30),transparent);
+  transform:skewX(-22deg);
+  transition:left .9s cubic-bezier(.22,1,.36,1);
+}
+.cast-btn:hover:not(:disabled){
+  transform:translateY(-3px);
+  box-shadow:
+    0 22px 44px -14px rgba(125,32,22,.74),
+    inset 0 1px 0 rgba(255,255,255,.28),
+    inset 0 -2px 6px rgba(0,0,0,.22);
+}
+.cast-btn:hover:not(:disabled)::before{left:130%}
+.cast-btn:active:not(:disabled){transform:translateY(-1px) scale(.985)}
+.cast-btn:disabled{
+  filter:saturate(.55) brightness(.9);
+  cursor:not-allowed;
+  box-shadow:0 8px 20px -12px rgba(125,32,22,.5);
+}
+
+.cast-btn.bronze{
+  background:linear-gradient(158deg,#5a7a62 0%,#456050 52%,#334a3c 100%);
+  box-shadow:
+    0 14px 34px -12px rgba(45,75,55,.6),
+    inset 0 1px 0 rgba(255,255,255,.22),
+    inset 0 -2px 6px rgba(0,0,0,.22);
+}
+.cast-btn.bronze:hover:not(:disabled){
+  box-shadow:
+    0 22px 44px -14px rgba(45,75,55,.7),
+    inset 0 1px 0 rgba(255,255,255,.28),
+    inset 0 -2px 6px rgba(0,0,0,.22);
+}
+
+/* ============ 卦象舞台 ============ */
+.hex-stage{
+  max-height:0;
+  overflow:hidden;
+  opacity:0;
+  transform:translateY(18px);
+  transition:
+    max-height 1s cubic-bezier(.22,1,.36,1),
+    opacity .8s cubic-bezier(.22,1,.36,1),
+    transform 1s cubic-bezier(.22,1,.36,1),
+    margin .9s cubic-bezier(.22,1,.36,1);
+  margin-top:0;
+}
+.hex-stage.show{
+  max-height:900px;
+  opacity:1;
+  transform:translateY(0);
+  margin-top:40px;
+}
+
+.coins{
+  display:flex;
+  justify-content:center;
+  gap:26px;
+  height:0;
+  opacity:0;
+  overflow:hidden;
+  transition:height .7s cubic-bezier(.22,1,.36,1), opacity .6s ease, margin .7s cubic-bezier(.22,1,.36,1);
+}
+.coins.show{height:70px;opacity:1;margin-bottom:26px}
+
+.coin{width:56px;height:56px;perspective:620px;flex:none}
+.coin-inner{width:100%;height:100%;position:relative;transform-style:preserve-3d;will-change:transform}
+.coin-face{
+  position:absolute;inset:0;
+  border-radius:50%;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+  display:grid;place-items:center;
+  box-shadow:
+    inset 0 0 0 2px rgba(92,70,30,.34),
+    inset 0 4px 9px rgba(255,244,214,.30),
+    0 6px 14px -4px rgba(80,60,30,.42);
+}
+.coin-face::before{
+  content:'';
+  width:15px;height:15px;
+  background:#e4d6b8;
+  border-radius:2px;
+  box-shadow:inset 0 0 5px rgba(70,50,20,.55), 0 0 3px rgba(70,50,20,.25);
+}
+.coin-face.front{background:radial-gradient(circle at 34% 28%,#e2c68a,#bd9a52 46%,#8a6a2e 100%)}
+.coin-face.back{
+  background:radial-gradient(circle at 34% 28%,#c9a662,#9c7a38 48%,#6b5020 100%);
+  transform:rotateY(180deg);
+}
+
+.hexagram{display:flex;flex-direction:column-reverse;gap:13px;align-items:center;padding:6px 0 10px}
+
+.yao-row{
+  display:flex;align-items:center;gap:14px;
+  width:100%;max-width:340px;
+  animation:rowIn .75s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes rowIn{
+  from{opacity:0;transform:translateY(14px)}
+  to  {opacity:1;transform:translateY(0)}
+}
+
+.yao-pos{width:18px;flex:none;text-align:center;font-size:13px;color:var(--ink-fade);opacity:.75}
+.mv{width:18px;flex:none;text-align:center;font-size:15px;color:var(--cinnabar);animation:mvPulse 2.6s ease-in-out infinite}
+@keyframes mvPulse{
+  0%,100%{opacity:.95;transform:scale(1)}
+  50%    {opacity:.45;transform:scale(1.22)}
+}
+
+.yao{
+  flex:1;display:flex;gap:42px;height:15px;max-width:246px;
+  animation:yaoIn .78s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes yaoIn{
+  from{transform:scaleX(.16);filter:blur(6px);opacity:.25}
+  60% {filter:blur(0)}
+  to  {transform:scaleX(1);filter:blur(0);opacity:1}
+}
+
+.yao .bar{
+  flex:1;height:100%;border-radius:3px;
+  background:linear-gradient(180deg,#3d372f 0%,#262119 55%,#1a1512 100%);
+  box-shadow:0 3px 8px -2px rgba(60,45,30,.45), inset 0 1px 0 rgba(255,255,255,.09);
+}
+.yao.yin .bar{flex:0 0 calc(50% - 21px)}
+
+.yao.moving .bar{
+  background:linear-gradient(180deg,#bd4b31 0%,#9a2e1d 55%,#7c2113 100%);
+  box-shadow:0 0 16px rgba(176,58,46,.5), 0 3px 8px -2px rgba(90,35,20,.5), inset 0 1px 0 rgba(255,255,255,.14);
+}
+
+/* ============ 解卦 ============ */
+.verdict{
+  max-height:0;overflow:hidden;opacity:0;transform:translateY(22px);
+  transition:
+    max-height 1.1s cubic-bezier(.22,1,.36,1),
+    opacity .9s cubic-bezier(.22,1,.36,1),
+    transform 1s cubic-bezier(.22,1,.36,1),
+    margin .9s cubic-bezier(.22,1,.36,1);
+  margin-top:0;
+}
+.verdict.show{max-height:2000px;opacity:1;transform:translateY(0);margin-top:34px}
+
+.v-inner{border-top:1px solid rgba(120,100,70,.22);padding-top:34px}
+
+.v-top{text-align:center;margin-bottom:32px}
+.v-cat{
+  display:inline-block;font-size:12px;letter-spacing:.28em;text-indent:.28em;
+  color:var(--cinnabar);
+  border:1px solid rgba(158,43,37,.38);
+  border-radius:100px;
+  padding:5px 16px 5px 18px;
+  margin-bottom:18px;
+  background:rgba(158,43,37,.05);
+}
+.v-name{
+  font-size:clamp(28px,6vw,38px);
+  letter-spacing:.22em;text-indent:.22em;
+  color:#231e19;margin-bottom:12px;
+  text-shadow:0 3px 18px rgba(120,98,64,.24);
+}
+.v-tri{font-size:14px;letter-spacing:.16em;color:var(--ink-fade)}
+.v-tri i{font-style:normal;margin:0 10px;opacity:.5}
+
+.v-section{margin-bottom:26px;padding-left:16px;position:relative}
+.v-section::before{
+  content:'';position:absolute;left:0;top:5px;
+  width:2px;height:calc(100% - 6px);border-radius:2px;
+  background:linear-gradient(180deg,rgba(158,43,37,.55),rgba(158,43,37,.06));
+}
+.v-label{
+  font-size:12px;letter-spacing:.3em;text-indent:.3em;
+  color:var(--cinnabar);opacity:.82;margin-bottom:11px;
+}
+.v-text{
+  font-size:16.5px;line-height:2.05;color:var(--ink-soft);
+  letter-spacing:.04em;text-align:justify;
+}
+.v-kw{margin-top:12px;font-size:15px;letter-spacing:.14em;color:var(--gold);opacity:.9}
+
+.v-summary{
+  margin-top:34px;padding:20px 22px;border-radius:10px;
+  background:linear-gradient(140deg,rgba(158,43,37,.055),rgba(168,134,60,.055));
+  border:1px solid rgba(158,43,37,.14);
+  font-size:16px;letter-spacing:.1em;line-height:1.9;
+  color:var(--ink-soft);text-align:center;
+}
+
+.verdict.show .v-inner > *{animation:vFade .95s cubic-bezier(.22,1,.36,1) both}
+.verdict.show .v-inner > *:nth-child(1){animation-delay:.10s}
+.verdict.show .v-inner > *:nth-child(2){animation-delay:.24s}
+.verdict.show .v-inner > *:nth-child(3){animation-delay:.36s}
+.verdict.show .v-inner > *:nth-child(4){animation-delay:.48s}
+.verdict.show .v-inner > *:nth-child(5){animation-delay:.60s}
+.verdict.show .v-inner > *:nth-child(6){animation-delay:.72s}
+@keyframes vFade{
+  from{opacity:0;transform:translateY(16px);filter:blur(5px)}
+  to  {opacity:1;transform:translateY(0);filter:blur(0)}
+}
+
+/* ============================================================
+   八字排盘
+   ============================================================ */
+.bronze-ding{
+  display:flex;
+  justify-content:center;
+  margin-bottom:26px;
+  opacity:.9;
+  animation:softIn 1.6s cubic-bezier(.22,1,.36,1) .3s both;
+}
+.bronze-ding svg{
+  width:110px;
+  height:auto;
+  filter:drop-shadow(0 6px 14px rgba(60,90,70,.25));
+  animation:dingFloat 9s ease-in-out infinite;
+}
+@keyframes dingFloat{
+  0%,100%{transform:translateY(0)}
+  50%    {transform:translateY(-5px)}
+}
+
+.bazi-inputs{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  margin-bottom:26px;
+}
+@media(max-width:520px){
+  .bazi-inputs{grid-template-columns:1fr}
+}
+
+.bazi-field{display:flex;flex-direction:column;gap:8px}
+.bazi-field label{
+  font-size:13px;
+  letter-spacing:.22em;
+  text-indent:.22em;
+  color:var(--ink-fade);
+}
+.bazi-field input{
+  font-family:inherit;
+  font-size:16px;
+  letter-spacing:.08em;
+  padding:13px 14px;
+  color:var(--ink);
+  background:rgba(255,252,244,.62);
+  border:1px solid rgba(120,100,70,.28);
+  border-radius:8px;
+  outline:none;
+  transition:
+    border-color .5s cubic-bezier(.22,1,.36,1),
+    box-shadow .5s cubic-bezier(.22,1,.36,1),
+    background .5s cubic-bezier(.22,1,.36,1);
+  -webkit-appearance:none;
+  appearance:none;
+}
+.bazi-field input:focus{
+  border-color:rgba(92,122,99,.65);
+  background:rgba(255,253,248,.92);
+  box-shadow:0 0 0 3px rgba(92,122,99,.12);
+}
+.bazi-field input::-webkit-calendar-picker-indicator{
+  opacity:.5;
+  cursor:pointer;
+  filter:sepia(1) saturate(2) hue-rotate(80deg);
+}
+
+.bazi-result{
+  max-height:0;overflow:hidden;opacity:0;transform:translateY(22px);
+  transition:
+    max-height 1.2s cubic-bezier(.22,1,.36,1),
+    opacity .9s cubic-bezier(.22,1,.36,1),
+    transform 1s cubic-bezier(.22,1,.36,1),
+    margin .9s cubic-bezier(.22,1,.36,1);
+  margin-top:0;
+}
+.bazi-result.show{max-height:2600px;opacity:1;transform:translateY(0);margin-top:34px}
+
+.bz-inner{border-top:1px solid rgba(120,100,70,.22);padding-top:32px}
+
+.pillars{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:12px;
+  margin-bottom:32px;
+}
+@media(max-width:520px){
+  .pillars{gap:8px}
+}
+
+.pillar{
+  text-align:center;
+  padding:18px 6px 16px;
+  background:rgba(255,252,244,.55);
+  border:1px solid rgba(120,100,70,.24);
+  border-radius:10px;
+  position:relative;
+  overflow:hidden;
+  animation:pillarIn .85s cubic-bezier(.22,1,.36,1) both;
+}
+.pillar:nth-child(1){animation-delay:.08s}
+.pillar:nth-child(2){animation-delay:.20s}
+.pillar:nth-child(3){animation-delay:.32s}
+.pillar:nth-child(4){animation-delay:.44s}
+@keyframes pillarIn{
+  from{opacity:0;transform:translateY(18px) scale(.94);filter:blur(5px)}
+  to  {opacity:1;transform:translateY(0) scale(1);filter:blur(0)}
+}
+
+.pillar::before{
+  content:'';
+  position:absolute;inset:5px;
+  border:1px solid rgba(92,122,99,.14);
+  border-radius:6px;
+  pointer-events:none;
+}
+
+.pillar-label{
+  font-size:12px;
+  letter-spacing:.2em;
+  text-indent:.2em;
+  color:var(--ink-fade);
+  margin-bottom:12px;
+}
+
+.pillar-gan, .pillar-zhi{
+  font-size:clamp(26px,5.6vw,34px);
+  line-height:1.35;
+}
+.pillar-gan{color:#7a4a2e}
+.pillar-zhi{color:var(--bronze-dark)}
+
+.pillar-wx{
+  margin-top:10px;
+  font-size:12px;
+  letter-spacing:.14em;
+  color:var(--gold);
+  opacity:.85;
+}
+
+.pillar.daymaster{
+  background:linear-gradient(160deg,rgba(158,43,37,.07),rgba(255,252,244,.65));
+  border-color:rgba(158,43,37,.38);
+  box-shadow:0 8px 24px -12px rgba(158,43,37,.4);
+}
+.pillar.daymaster::before{border-color:rgba(158,43,37,.2)}
+.pillar.daymaster .pillar-label{color:var(--cinnabar)}
+.pillar.daymaster .pillar-gan{color:var(--cinnabar)}
+
+.wx-block{
+  margin-bottom:30px;
+  padding:22px 20px;
+  border-radius:10px;
+  background:linear-gradient(140deg,rgba(92,122,99,.055),rgba(168,134,60,.04));
+  border:1px solid rgba(92,122,99,.16);
+}
+.wx-title{
+  font-size:12px;
+  letter-spacing:.3em;
+  text-indent:.3em;
+  color:var(--bronze-dark);
+  opacity:.85;
+  margin-bottom:18px;
+}
+.wx-row{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom:12px;
+}
+.wx-row:last-child{margin-bottom:0}
+
+.wx-name{
+  width:30px;
+  flex:none;
+  font-size:16px;
+  text-align:center;
+  color:var(--ink-soft);
+  letter-spacing:.06em;
+}
+
+.wx-track{
+  flex:1;
+  height:14px;
+  border-radius:7px;
+  background:rgba(120,100,70,.10);
+  overflow:hidden;
+  position:relative;
+}
+.wx-fill{
+  height:100%;
+  border-radius:7px;
+  width:0;
+  transition:width 1.3s cubic-bezier(.22,1,.36,1);
+  position:relative;
+}
+.wx-fill::after{
+  content:'';
+  position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.35),transparent 60%);
+  border-radius:7px;
+}
+.wx-wood {background:linear-gradient(90deg,#6b9b6b,#4e7a4e)}
+.wx-fire {background:linear-gradient(90deg,#c2604a,#9e2b25)}
+.wx-earth{background:linear-gradient(90deg,#b89968,#8f7342)}
+.wx-metal{background:linear-gradient(90deg,#a8a8a8,#787878)}
+.wx-water{background:linear-gradient(90deg,#5b7fa6,#3d5c7f)}
+
+.wx-count{
+  width:22px;
+  flex:none;
+  text-align:center;
+  font-size:14px;
+  color:var(--ink-fade);
+  letter-spacing:.04em;
+}
+
+.bz-read{
+  padding-left:16px;
+  position:relative;
+  margin-bottom:24px;
+}
+.bz-read::before{
+  content:'';position:absolute;left:0;top:5px;
+  width:2px;height:calc(100% - 6px);border-radius:2px;
+  background:linear-gradient(180deg,rgba(92,122,99,.6),rgba(92,122,99,.06));
+}
+.bz-read .v-label{color:var(--bronze-dark)}
+.bz-read .v-text{
+  font-size:16.5px;
+  line-height:2.05;
+  color:var(--ink-soft);
+  letter-spacing:.04em;
+  text-align:justify;
+}
+
+.bz-summary{
+  margin-top:30px;
+  padding:20px 22px;
+  border-radius:10px;
+  background:linear-gradient(140deg,rgba(92,122,99,.06),rgba(168,134,60,.05));
+  border:1px solid rgba(92,122,99,.18);
+  font-size:16px;
+  letter-spacing:.1em;
+  line-height:1.9;
+  color:var(--ink-soft);
+  text-align:center;
+}
+
+/* ============ 提示 ============ */
+.toast{
+  position:fixed;left:50%;bottom:52px;
+  transform:translate(-50%,22px);
+  padding:13px 30px;
+  border-radius:8px;
+  background:rgba(42,37,33,.9);
+  color:#f0e6d2;
+  font-size:15px;
+  letter-spacing:.16em;
+  text-indent:.16em;
+  opacity:0;
+  pointer-events:none;
+  z-index:99;
+  box-shadow:0 14px 34px -12px rgba(0,0,0,.5);
+  transition:
+    opacity .55s cubic-bezier(.22,1,.36,1),
+    transform .55s cubic-bezier(.22,1,.36,1);
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ============ 页脚 ============ */
+.foot{
+  text-align:center;
+  margin-top:56px;
+  font-size:12.5px;
+  letter-spacing:.22em;
+  color:rgba(120,100,70,.62);
+  animation:softIn 1.6s cubic-bezier(.22,1,.36,1) .4s both;
+}
+
+@media(max-width:620px){
+  .wrap{padding:42px 18px 90px}
+  .panel{padding:26px 18px 30px;border-radius:12px}
+  .cast-btn{font-size:17px;padding:16px 40px}
+  .yao{max-width:200px;gap:32px}
+  .yao.yin .bar{flex:0 0 calc(50% - 16px)}
+  .coin{width:48px;height:48px}
+  .coins{gap:20px}
+  .coins.show{height:60px}
+  .v-text{font-size:15.5px;line-height:2}
+  .tab{font-size:14px;padding:10px 18px}
+  .bronze-ding svg{width:88px}
+  .pillar{padding:14px 4px 12px}
+  .pillar-wx{font-size:11px}
+}
+</style>
+</head>
+<body class="loading">
+
+<!-- ==================== 加载动画 ==================== -->
+<div class="loader" id="loader" aria-hidden="true">
+  <div class="loader-center">
+    <div class="loader-wheel">
+      <div class="bagua" id="bagua"></div>
+      <div class="taiji-wrap" id="taijiWrap">
+        <div class="taiji">
+          <div class="taiji-half"></div>
+          <div class="taiji-dot-top"></div>
+          <div class="taiji-dot-bot"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="loader-text fnt-seal">凝 神 静 气</p>
+</div>
+
+<!-- ==================== 主站 ==================== -->
+<div class="vignette"></div>
+
+<!-- 祥云层 -->
+<div class="cloud-layer" aria-hidden="true">
+  <div class="cloud c1">
+    <svg viewBox="0 0 260 110" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="cgA" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity=".95"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity=".35"/>
+      </linearGradient></defs>
+      <g fill="url(#cgA)">
+        <circle cx="60" cy="63" r="32"/><circle cx="110" cy="53" r="42"/>
+        <circle cx="165" cy="60" r="35"/><circle cx="215" cy="70" r="25"/>
+        <rect x="28" y="55" width="212" height="40" rx="20"/>
+      </g>
+    </svg>
+  </div>
+  <div class="cloud c2">
+    <svg viewBox="0 0 260 110" xmlns="http://www.w3.org/2000/svg">
+      <g fill="url(#cgA)">
+        <circle cx="60" cy="63" r="32"/><circle cx="110" cy="53" r="42"/>
+        <circle cx="165" cy="60" r="35"/><circle cx="215" cy="70" r="25"/>
+        <rect x="28" y="55" width="212" height="40" rx="20"/>
+      </g>
+    </svg>
+  </div>
+  <div class="cloud c3">
+    <svg viewBox="0 0 260 110" xmlns="http://www.w3.org/2000/svg">
+      <g fill="url(#cgA)">
+        <circle cx="60" cy="63" r="32"/><circle cx="110" cy="53" r="42"/>
+        <circle cx="165" cy="60" r="35"/><circle cx="215" cy="70" r="25"/>
+        <rect x="28" y="55" width="212" height="40" rx="20"/>
+      </g>
+    </svg>
+  </div>
+  <div class="cloud c4">
+    <svg viewBox="0 0 260 110" xmlns="http://www.w3.org/2000/svg">
+      <g fill="url(#cgA)">
+        <circle cx="60" cy="63" r="32"/><circle cx="110" cy="53" r="42"/>
+        <circle cx="165" cy="60" r="35"/><circle cx="215" cy="70" r="25"/>
+        <rect x="28" y="55" width="212" height="40" rx="20"/>
+      </g>
+    </svg>
+  </div>
+  <div class="cloud c5">
+    <svg viewBox="0 0 260 110" xmlns="http://www.w3.org/2000/svg">
+      <g fill="url(#cgA)">
+        <circle cx="60" cy="63" r="32"/><circle cx="110" cy="53" r="42"/>
+        <circle cx="165" cy="60" r="35"/><circle cx="215" cy="70" r="25"/>
+        <rect x="28" y="55" width="212" height="40" rx="20"/>
+      </g>
+    </svg>
+  </div>
+  <div class="cloud c6">
+    <svg viewBox="0 0 260 110" xmlns="http://www.w3.org/2000/svg">
+      <g fill="url(#cgA)">
+        <circle cx="60" cy="63" r="32"/><circle cx="110" cy="53" r="42"/>
+        <circle cx="165" cy="60" r="35"/><circle cx="215" cy="70" r="25"/>
+        <rect x="28" y="55" width="212" height="40" rx="20"/>
+      </g>
+    </svg>
+  </div>
+  <div class="cloud c7">
+    <svg viewBox="0 0 260 110" xmlns="http://www.w3.org/2000/svg">
+      <g fill="url(#cgA)">
+        <circle cx="60" cy="63" r="32"/><circle cx="110" cy="53" r="42"/>
+        <circle cx="165" cy="60" r="35"/><circle cx="215" cy="70" r="25"/>
+        <rect x="28" y="55" width="212" height="40" rx="20"/>
+      </g>
+    </svg>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="seal fnt-seal">卜</div>
+    <h1 class="fnt-seal">六爻问卦</h1>
+    <div class="rule"></div>
+    <p class="sub">凝神静气 · 心诚则灵</p>
+  </header>
+
+  <div class="bronze-strip" aria-hidden="true">
+    <span></span><i></i><span></span>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="liuyao">六爻问卦</button>
+    <button class="tab" data-tab="bazi">八字排盘</button>
+  </nav>
+
+  <!-- ========== 六爻面板 ========== -->
+  <section class="panel" id="panel-liuyao">
+
+    <div class="panel-title"><span>壹</span>择所问之事</div>
+    <div class="cats" id="cats">
+      <button class="cat" data-cat="career">事业</button>
+      <button class="cat" data-cat="study">学业</button>
+      <button class="cat" data-cat="wealth">财运</button>
+      <button class="cat" data-cat="romance">桃花</button>
+      <button class="cat" data-cat="marriage">姻缘</button>
+      <button class="cat" data-cat="health">健康</button>
+    </div>
+
+    <div class="panel-title"><span>贰</span>心中默念所问，而后起卦</div>
+
+    <div class="cast-area">
+      <button class="cast-btn" id="castBtn">起 卦</button>
+    </div>
+
+    <div class="hex-stage" id="hexStage">
+      <div class="coins" id="coins">
+        <div class="coin"><div class="coin-inner">
+          <div class="coin-face front"></div><div class="coin-face back"></div>
+        </div></div>
+        <div class="coin"><div class="coin-inner">
+          <div class="coin-face front"></div><div class="coin-face back"></div>
+        </div></div>
+        <div class="coin"><div class="coin-inner">
+          <div class="coin-face front"></div><div class="coin-face back"></div>
+        </div></div>
+      </div>
+      <div class="hexagram" id="hexagram"></div>
+    </div>
+
+    <div class="verdict" id="verdict"></div>
+
+  </section>
+
+  <!-- ========== 八字面板 ========== -->
+  <section class="panel" id="panel-bazi" hidden>
+
+    <div class="bronze-ding" aria-hidden="true">
+      <svg viewBox="0 0 130 112" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="bronzeGrad" x1="0" y1="0" x2="0.4" y2="1">
+            <stop offset="0%" stop-color="#8aa891"/>
+            <stop offset="45%" stop-color="#5c7a63"/>
+            <stop offset="100%" stop-color="#3a4f42"/>
+          </linearGradient>
+          <linearGradient id="bronzeGrad2" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#a3bfa9"/>
+            <stop offset="100%" stop-color="#4e6b57"/>
+          </linearGradient>
+        </defs>
+
+        <path d="M32 34 Q26 12 44 13" stroke="url(#bronzeGrad)" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path d="M98 34 Q104 12 86 13" stroke="url(#bronzeGrad)" stroke-width="5" fill="none" stroke-linecap="round"/>
+
+        <path d="M28 34 Q22 74 40 86 L90 86 Q108 74 102 34 Z"
+              fill="url(#bronzeGrad)" stroke="#33493b" stroke-width="1.6"/>
+
+        <ellipse cx="65" cy="34" rx="37" ry="7.5"
+                 fill="url(#bronzeGrad2)" stroke="#33493b" stroke-width="1.6"/>
+        <ellipse cx="65" cy="34" rx="27" ry="4.6" fill="#2b3d32" opacity=".55"/>
+
+        <rect x="34" y="48" width="62" height="11" rx="1.6" fill="#2b3d32" opacity=".35"/>
+        <g stroke="#c9dccb" stroke-width="1.1" opacity=".55" fill="none">
+          <path d="M40 53 h4 v3 h-4 z M48 53 h5 M57 53 v4 M64 53 h4 v3 h-4 z M72 53 h5 M81 53 v4 M88 53 h4"/>
+        </g>
+
+        <g stroke="#c9dccb" stroke-width="1" opacity=".4" fill="none">
+          <path d="M38 66 h8 v-5 h-5 v3"/>
+          <path d="M84 66 h8 v-5 h-5 v3"/>
+        </g>
+
+        <path d="M44 86 L40 105" stroke="url(#bronzeGrad)" stroke-width="6" stroke-linecap="round"/>
+        <path d="M65 86 L65 105" stroke="url(#bronzeGrad)" stroke-width="6" stroke-linecap="round"/>
+        <path d="M86 86 L90 105" stroke="url(#bronzeGrad)" stroke-width="6" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div class="panel-title"><span>壹</span>录入生辰</div>
+
+    <div class="bazi-inputs">
+      <div class="bazi-field">
+        <label>出生日期</label>
+        <input type="date" id="birthDate" value="1995-06-15">
+      </div>
+      <div class="bazi-field">
+        <label>出生时刻</label>
+        <input type="time" id="birthTime" value="12:00">
+      </div>
+    </div>
+
+    <div class="cast-area">
+      <button class="cast-btn bronze" id="baziBtn">排 盘</button>
+    </div>
+
+    <div class="bazi-result" id="baziResult"></div>
+
+  </section>
+
+  <p class="foot fnt-seal">卦由心生 · 象由心解 · 吉凶在人不在卦</p>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ==========================================================
+   加载动画：太极旋转 + 八卦环绕（JS 驱动，绝对可靠）
+   ========================================================== */
+(function setupLoader(){
+  const bagua      = document.getElementById('bagua');
+  const taijiWrap  = document.getElementById('taijiWrap');
+  const loaderEl   = document.getElementById('loader');
+  if(!bagua || !loaderEl) return;
+
+  const GUA_SYMS = ['☰','☱','☲','☳','☴','☵','☶','☷'];
+
+  // 半径：跟随屏幕尺寸
+  const radius = Math.min(98, window.innerWidth * 0.28);
+
+  // 创建 8 个卦象，计算各自的目标位置
+  const guaEls = [];
+  GUA_SYMS.forEach((sym, i) => {
+    const el = document.createElement('span');
+    el.className = 'gua';
+    el.textContent = sym;
+
+    // 先天八卦方位：乾南（上）、兑东南、离东、震东北、巽西南、坎西、艮西北、坤北（下）
+    const angleDeg = i * 45;
+    const angleRad = angleDeg * Math.PI / 180;
+    const x =  Math.sin(angleRad) * radius;
+    const y = -Math.cos(angleRad) * radius;
+
+    el.style.setProperty('--tx', x.toFixed(2) + 'px');
+    el.style.setProperty('--ty', y.toFixed(2) + 'px');
+    el.style.transitionDelay = (0.55 + i * 0.10) + 's';
+
+    bagua.appendChild(el);
+    guaEls.push(el);
+  });
+
+  // 下一帧触发进入动画（确保初始状态已渲染）
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      guaEls.forEach(el => el.classList.add('in'));
+      if(taijiWrap) taijiWrap.classList.add('in');
+    });
+  });
+
+  // 加载结束 → 淡出并移除
+  const LOADER_DURATION = 4200;
+  setTimeout(() => {
+    loaderEl.classList.add('done');
+    document.body.classList.remove('loading');
+    setTimeout(() => loaderEl.remove(), 1100);
+  }, LOADER_DURATION);
+})();
+
+/* ==========================================================
+   通用工具
+   ========================================================== */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function toast(msg){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+}
+
+/* ==========================================================
+   Tab 切换
+   ========================================================== */
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.getElementById('panel-liuyao').hidden = target !== 'liuyao';
+    document.getElementById('panel-bazi').hidden  = target !== 'bazi';
+  });
+});
+
+/* ==========================================================
+   六爻 —— 数据
+   ========================================================== */
+const CAT_NAMES = {
+  career:'事业', study:'学业', wealth:'财运',
+  romance:'桃花', marriage:'姻缘', health:'健康'
+};
+
+const TRIGRAMS = [
+  {name:'乾', bin:'111', sym:'☰', nature:'天'},
+  {name:'兑', bin:'110', sym:'☱', nature:'泽'},
+  {name:'离', bin:'101', sym:'☲', nature:'火'},
+  {name:'震', bin:'100', sym:'☳', nature:'雷'},
+  {name:'巽', bin:'011', sym:'☴', nature:'风'},
+  {name:'坎', bin:'010', sym:'☵', nature:'水'},
+  {name:'艮', bin:'001', sym:'☶', nature:'山'},
+  {name:'坤', bin:'000', sym:'☷', nature:'地'},
+];
+
+const HEXAGRAMS = {
+'111111':{n:'乾为天',s:2,k:'刚健中正，自强不息'},
+'111110':{n:'天泽履',s:1,k:'如履薄冰，谨慎前行'},
+'111101':{n:'天火同人',s:1,k:'同心协力，众志成城'},
+'111100':{n:'天雷无妄',s:1,k:'顺其自然，勿存妄念'},
+'111011':{n:'天风姤',s:0,k:'邂逅相逢，防微杜渐'},
+'111010':{n:'天水讼',s:-1,k:'争讼纷扰，退让为安'},
+'111001':{n:'天山遁',s:-1,k:'适时退避，蓄势待发'},
+'111000':{n:'天地否',s:-1,k:'闭塞不通，静待时机'},
+'110111':{n:'泽天夬',s:1,k:'决断果行，当机立断'},
+'110110':{n:'兑为泽',s:1,k:'和悦喜悦，以柔待人'},
+'110101':{n:'泽火革',s:1,k:'革故鼎新，破旧立新'},
+'110100':{n:'泽雷随',s:1,k:'随顺时势，择善而从'},
+'110011':{n:'泽风大过',s:-1,k:'负重过甚，需防倾覆'},
+'110010':{n:'泽水困',s:-2,k:'困顿受阻，守正待时'},
+'110001':{n:'泽山咸',s:2,k:'感应相通，情投意合'},
+'110000':{n:'泽地萃',s:1,k:'聚集汇合，群贤毕至'},
+'101111':{n:'火天大有',s:2,k:'大有所获，光明亨通'},
+'101110':{n:'火泽睽',s:-1,k:'乖离分歧，求同存异'},
+'101101':{n:'离为火',s:1,k:'光明附丽，柔顺守正'},
+'101100':{n:'火雷噬嗑',s:0,k:'明辨是非，刚柔并济'},
+'101011':{n:'火风鼎',s:1,k:'鼎新致养，稳重图变'},
+'101010':{n:'火水未济',s:0,k:'事未竟成，慎终如始'},
+'101001':{n:'火山旅',s:-1,k:'漂泊在外，安分守己'},
+'101000':{n:'火地晋',s:2,k:'旭日东升，晋升有望'},
+'100111':{n:'雷天大壮',s:1,k:'声势浩大，勿用非正'},
+'100110':{n:'雷泽归妹',s:0,k:'婚嫁之象，谨慎相待'},
+'100101':{n:'雷火丰',s:2,k:'丰盛盈满，盛极当思'},
+'100100':{n:'震为雷',s:0,k:'震动惊惧，临危不乱'},
+'100011':{n:'雷风恒',s:1,k:'恒久不变，持之以恒'},
+'100010':{n:'雷水解',s:2,k:'解除束缚，化险为夷'},
+'100001':{n:'雷山小过',s:-1,k:'小有过越，宜下不宜上'},
+'100000':{n:'雷地豫',s:1,k:'愉悦和乐，顺时而动'},
+'011111':{n:'风天小畜',s:0,k:'小有积蓄，蓄势待发'},
+'011110':{n:'风泽中孚',s:2,k:'诚信中正，以诚待人'},
+'011101':{n:'风火家人',s:1,k:'家道兴旺，内外有序'},
+'011100':{n:'风雷益',s:2,k:'增益有利，损上益下'},
+'011011':{n:'巽为风',s:1,k:'柔顺谦逊，随风而入'},
+'011010':{n:'风水涣',s:0,k:'涣散流通，聚而能散'},
+'011001':{n:'风山渐',s:1,k:'循序渐进，步步为营'},
+'011000':{n:'风地观',s:0,k:'观察审势，静观其变'},
+'010111':{n:'水天需',s:0,k:'待时而动，耐心等待'},
+'010110':{n:'水泽节',s:1,k:'节制有度，量入为出'},
+'010101':{n:'水火既济',s:1,k:'事已成就，守成防变'},
+'010100':{n:'水雷屯',s:-1,k:'起步维艰，艰难创始'},
+'010011':{n:'水风井',s:0,k:'井养不穷，静守其常'},
+'010010':{n:'坎为水',s:-2,k:'重重险难，守心待援'},
+'010001':{n:'水山蹇',s:-1,k:'前行受阻，宜止不宜进'},
+'010000':{n:'水地比',s:2,k:'亲比相助，团结和睦'},
+'001111':{n:'山天大畜',s:1,k:'大有积蓄，厚积薄发'},
+'001110':{n:'山泽损',s:0,k:'损己利人，先损后益'},
+'001101':{n:'山火贲',s:1,k:'文饰增彩，内外兼修'},
+'001100':{n:'山雷颐',s:0,k:'颐养身心，慎言慎食'},
+'001011':{n:'山风蛊',s:-1,k:'积弊待治，拨乱反正'},
+'001010':{n:'山水蒙',s:-1,k:'蒙昧未明，求教明师'},
+'001001':{n:'艮为山',s:0,k:'止而不动，安守本分'},
+'001000':{n:'山地剥',s:-2,k:'剥落衰退，顺时守静'},
+'000111':{n:'地天泰',s:2,k:'上下交通，万事亨通'},
+'000110':{n:'地泽临',s:1,k:'居高临下，宽厚待下'},
+'000101':{n:'地火明夷',s:-2,k:'光明受损，韬光养晦'},
+'000100':{n:'地雷复',s:1,k:'一阳来复，否极泰来'},
+'000011':{n:'地风升',s:2,k:'上升有望，积小成大'},
+'000010':{n:'地水师',s:0,k:'兴师动众，师出有名'},
+'000001':{n:'地山谦',s:2,k:'谦谦君子，有终有吉'},
+'000000':{n:'坤为地',s:2,k:'厚德载物，柔顺承天'},
+};
+
+const READINGS = {
+career:[
+'事业困顿，前路多艰，所谋之事屡屡受阻，或有小人掣肘。此时宜暂缓其行，修身蓄力，切忌强出头、轻举妄动。待时而动，方为上策。',
+'事业略有阻滞，行事多遇牵绊，常有力不从心之感。宜低调收敛，勿与人争锋，稳守本职，慢慢积蓄能量，机遇自会在不经意间到来。',
+'事业运势平平，暂无大起大落之象。眼下宜沉淀积累，打磨技艺，静候时机成熟。不必急于求成，亦不必妄自菲薄，守正待时可也。',
+'事业运势向好，稳步前行可有所成。宜守正持恒，踏实做事，勿贪捷径。贵人或在身侧，多与同道切磋，机会自会不期而至。',
+'事业如日中天，所谋之事多能顺遂，正是大展宏图之时。宜乘势而上，广结善缘，切勿犹豫观望而错失良机。然盛极须防骄，居安当思危。'
+],
+study:[
+'学业受阻，心浮气躁，难以专注，进境迟缓。宜暂歇重整，寻良师益友相助，调整心绪。切忌蛮干硬撑，劳而无功。',
+'学业略有分心，杂事缠身，进境不及预期。宜收心定志，摒弃外扰，为自己立下明确的小目标，循序渐进。',
+'学业平稳，进展如常，无大起亦无大落。宜调整方法，查漏补缺，稳中求进。基础打得牢，日后方能走得更远。',
+'学业顺遂，用心则有所得，考试竞技多有佳绩之望。宜持之以恒，勿因一时小成而懈怠，趁热打铁方为上策。',
+'学业精进，思路通达，灵感泉涌，考试竞技皆有大成之望。宜一鼓作气，深入钻研，此阶段所学将为日后奠定根基。'
+],
+wealth:[
+'财路不通，损财之象明显，或有意外破耗。宜静守不动，切勿冒险求财、轻信他人之言。守得住便是赚得到。',
+'财运欠佳，破耗易生，进项不及预期。宜守成节流，慎防小人算计，大额支出务必三思。开源暂缓，节流为先。',
+'财运平平，收支相当，无甚惊喜亦无大忧。宜量入为出，不宜大额投机。此阶段适合积累本金，等待时机。',
+'财运渐旺，进项可期，正财尤佳。宜稳健理财，细水长流，勿因贪念而涉险。留有余地，方能源源不断。',
+'财源广进，正财偏财皆有可期，或有意外之喜。宜把握良机，但忌贪得无厌。见好就收，落袋为安，方是长久之道。'
+],
+romance:[
+'桃花凋零，情路坎坷，落花有意流水无情。宜守心自持，勿因一时情动而失理智。缘分未至，强求无益。',
+'桃花纷杂，易遇烂桃花，看似热烈实则虚浮。宜擦亮双眼，勿轻易投入真心。多观察少承诺，方免日后伤心。',
+'桃花平淡，情缘未至，身边暂无合适之人。宜提升自我，静候佳期。花若盛开，蝴蝶自来。',
+'桃花渐起，有缘人可遇，或于不经意间邂逅。宜多参与社交，敞开心扉，莫因矜持而错过良缘。',
+'桃花盛开，异性缘极佳，情愫暗生，两情相悦之象。宜主动示好，把握良机。真心以待，必有所获。'
+],
+marriage:[
+'姻缘多舛，感情易生裂痕，误会猜忌丛生。宜冷静自省，暂缓重大决断。心平气和之后，再论去留。',
+'姻缘有波，易生口角误解，多因琐事而起。宜多包容退让，切勿意气用事。退一步海阔天空，忍一时风平浪静。',
+'姻缘平稳，感情如常，虽无波澜亦无风浪。宜多沟通体谅，于平淡中见真意，于细微处添温情。',
+'姻缘向好，感情渐入佳境，彼此心意相通。宜以诚相待，用心经营，共筑未来之基。',
+'姻缘天成，感情和睦，有情人终成眷属之象。宜珍惜眼前人，莫负好时光。执子之手，与子偕老。'
+],
+health:[
+'健康堪忧，需多加留意，或有隐疾未显。宜及时就医检查，切勿拖延讳疾。作息饮食，皆当谨慎。',
+'身体略感不适，易疲劳乏力，精神不济。宜多休息，忌熬夜劳神，饮食宜清淡。小病早治，方免大患。',
+'健康平稳，无大碍，身心俱安。宜注意作息规律，防患于未然。适度运动，胜于服药。',
+'身体安泰，小恙易愈，精神尚佳。宜适度锻炼，规律饮食，保持心境平和，则百病不侵。',
+'体魄强健，精神饱满，诸事皆宜。宜保持作息，勿因年轻而透支，勿因忙碌而忘养。身安则心安。'
+]
+};
+
+const POS_NAMES = ['初','二','三','四','五','上'];
+const SUMMARIES = [
+  '时运不济，宜守不宜进。静待云开，自有月明。',
+  '运势稍滞，宜稳不宜急。收敛锋芒，养精蓄锐。',
+  '运程平顺，宜守正待时。不急不躁，水到渠成。',
+  '运势渐佳，宜顺势而为。把握当下，稳步前行。',
+  '时运亨通，宜乘势而进。机不可失，时不再来。'
+];
+
+/* ==========================================================
+   六爻 —— 元素与状态
+   ========================================================== */
+const catsEl    = document.getElementById('cats');
+const castBtn   = document.getElementById('castBtn');
+const hexStage  = document.getElementById('hexStage');
+const hexEl     = document.getElementById('hexagram');
+const coinsEl   = document.getElementById('coins');
+const verdictEl = document.getElementById('verdict');
+
+const state = {
+  category: null,
+  casting: false,
+  coinRot: [0, 0, 0],
+};
+
+catsEl.addEventListener('click', e => {
+  const btn = e.target.closest('.cat');
+  if(!btn || state.casting) return;
+  catsEl.querySelectorAll('.cat').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.category = btn.dataset.cat;
+});
+
+function castOne(){
+  return new Promise(resolve => {
+    const isHead = [0,1,2].map(() => Math.random() < 0.5);
+    const inners = document.querySelectorAll('.coin-inner');
+
+    inners.forEach((el, i) => {
+      const finalDeg = isHead[i] ? 0 : 180;
+      const from = state.coinRot[i];
+      let delta = (finalDeg - (from % 360) + 360) % 360;
+      if(delta < 180) delta += 360;
+      const to = from + delta + 360;
+      state.coinRot[i] = to;
+
+      const anim = el.animate(
+        [
+          { transform: `rotateY(${from}deg)` },
+          { transform: `rotateY(${to}deg)` }
+        ],
+        { duration: 520, easing: 'cubic-bezier(.18,.72,.30,1)' }
+      );
+      anim.onfinish = () => { el.style.transform = `rotateY(${to}deg)`; };
+    });
+
+    setTimeout(() => {
+      const sum = isHead.reduce((a, h) => a + (h ? 3 : 2), 0);
+      resolve({ sum, isHead });
+    }, 545);
+  });
+}
+
+function addYao(line, idx){
+  const yang   = line.sum === 7 || line.sum === 9;
+  const moving = line.sum === 6 || line.sum === 9;
+
+  const row = document.createElement('div');
+  row.className = 'yao-row';
+  row.innerHTML = `
+    <span class="yao-pos">${POS_NAMES[idx]}</span>
+    <div class="yao ${yang ? 'yang' : 'yin'} ${moving ? 'moving' : ''}">
+      <i class="bar"></i>${yang ? '' : '<i class="bar"></i>'}
+    </div>
+    <span class="mv">${moving ? (yang ? '○' : '×') : ''}</span>
+  `;
+  hexEl.appendChild(row);
+}
+
+function computeResult(lines){
+  const benBin = lines.map(l => (l.sum === 7 || l.sum === 9) ? '1' : '0').join('');
+  const benKey = benBin.slice(3,6) + benBin.slice(0,3);
+  const bianBin = lines.map(l => {
+    if(l.sum === 6) return '1';
+    if(l.sum === 9) return '0';
+    return (l.sum === 7) ? '1' : '0';
+  }).join('');
+  const bianKey = bianBin.slice(3,6) + bianBin.slice(0,3);
+  const movingIdx = [];
+  lines.forEach((l, i) => { if(l.sum === 6 || l.sum === 9) movingIdx.push(i); });
+  return { benKey, bianKey, movingIdx };
+}
+
+function renderVerdict(lines){
+  const r    = computeResult(lines);
+  const ben  = HEXAGRAMS[r.benKey];
+  const bian = HEXAGRAMS[r.bianKey];
+  const cat  = state.category;
+  const catName = CAT_NAMES[cat];
+  const reading = READINGS[cat][ben.s + 2];
+
+  const upBin = r.benKey.slice(0,3);
+  const loBin = r.benKey.slice(3,6);
+  const upT = TRIGRAMS.find(t => t.bin === upBin);
+  const loT = TRIGRAMS.find(t => t.bin === loBin);
+
+  let changeHtml = '';
+  if(r.movingIdx.length > 0){
+    const names = r.movingIdx.map(i => POS_NAMES[i] + '爻').join('、');
+    changeHtml = `
+      <div class="v-section">
+        <div class="v-label">爻 变</div>
+        <div class="v-text">
+          ${names}发动，卦变为「${bian.n}」。${bian.k}。事有变数，宜静观其变、顺势而为，不可执一而论。
+        </div>
+      </div>
+    `;
+  } else {
+    changeHtml = `
+      <div class="v-section">
+        <div class="v-label">爻 变</div>
+        <div class="v-text">
+          六爻安静，无动无变，事态平稳。宜守本卦之义而行，不必妄求更改，安分自守即是上策。
+        </div>
+      </div>
+    `;
+  }
+
+  verdictEl.innerHTML = `
+    <div class="v-inner">
+      <div class="v-top">
+        <div class="v-cat">${catName}</div>
+        <h2 class="v-name fnt-seal">${ben.n}</h2>
+        <div class="v-tri">
+          上${upT.name} ${upT.sym}<i>·</i>下${loT.name} ${loT.sym}
+        </div>
+      </div>
+
+      <div class="v-section">
+        <div class="v-label">卦 意</div>
+        <div class="v-text">${ben.k}。</div>
+        <div class="v-kw">卦象 · ${upT.nature}${loT.nature}相叠</div>
+      </div>
+
+      <div class="v-section">
+        <div class="v-label">${catName}之解</div>
+        <div class="v-text">${reading}</div>
+      </div>
+
+      ${changeHtml}
+
+      <div class="v-summary">${SUMMARIES[ben.s + 2]}</div>
+    </div>
+  `;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => verdictEl.classList.add('show'));
+  });
+
+  setTimeout(() => {
+    const rect = verdictEl.getBoundingClientRect();
+    if(rect.bottom > window.innerHeight){
+      verdictEl.scrollIntoView({ behavior:'smooth', block:'end' });
+    }
+  }, 320);
+}
+
+async function startCast(){
+  if(state.casting) return;
+
+  if(!state.category){
+    catsEl.classList.remove('shake');
+    void catsEl.offsetWidth;
+    catsEl.classList.add('shake');
+    toast('请先择所问之事');
+    return;
+  }
+
+  state.casting = true;
+  castBtn.disabled = true;
+  castBtn.textContent = '推演中…';
+
+  hexEl.innerHTML = '';
+  verdictEl.classList.remove('show');
+  verdictEl.innerHTML = '';
+  hexStage.classList.add('show');
+  coinsEl.classList.add('show');
+
+  document.querySelectorAll('.coin-inner').forEach((el,i) => {
+    state.coinRot[i] = 0;
+    el.style.transform = 'rotateY(0deg)';
+  });
+
+  await sleep(420);
+
+  const lines = [];
+  for(let i = 0; i < 6; i++){
+    const line = await castOne();
+    lines.push(line);
+    addYao(line, i);
+    await sleep(140);
+  }
+
+  await sleep(240);
+  coinsEl.classList.remove('show');
+
+  state.casting = false;
+  castBtn.disabled = false;
+  castBtn.textContent = '再 起 一 卦';
+
+  await sleep(260);
+  renderVerdict(lines);
+}
+
+castBtn.addEventListener('click', startCast);
+
+/* ==========================================================
+   八字排盘
+   ========================================================== */
+const GAN     = ['甲','乙','丙','丁','戊','己','庚','辛','壬','癸'];
+const ZHI     = ['子','丑','寅','卯','辰','巳','午','未','申','酉','戌','亥'];
+const GAN_WX  = ['木','木','火','火','土','土','金','金','水','水'];
+const ZHI_WX  = ['水','土','木','木','土','火','火','土','金','金','土','水'];
+const WX_LIST = ['木','火','土','金','水'];
+
+const DAY_MASTER_DESC = {
+  '木':'日主为木，性情仁厚，如春木生发，喜水滋润、火温暖。为人有担当，不喜受拘束，宜向东方发展。',
+  '火':'日主为火，性情明朗热烈，如夏火炎上，喜木来生、土来泄。为人热情果决，行动力强，宜向南方发展。',
+  '土':'日主为土，性情沉稳厚重，如大地承载，喜火来生、金来泄。为人诚信踏实，重情重义，宜守中宫。',
+  '金':'日主为金，性情刚毅果决，如秋金肃杀，喜土来生、水来泄。为人重义气讲原则，宜向西方发展。',
+  '水':'日主为水，性情聪慧灵动，如冬水润下，喜金来生、木来泄。为人机敏善变，宜向北方发展。'
+};
+
+function calcJDN(y, m, d){
+  const a  = Math.floor((14 - m) / 12);
+  const yy = y + 4800 - a;
+  const mm = m + 12 * a - 3;
+  return d + Math.floor((153 * mm + 2) / 5) + 365 * yy
+       + Math.floor(yy / 4) - Math.floor(yy / 100) + Math.floor(yy / 400) - 32045;
+}
+
+function computeBaZi(y, m, d, hh){
+
+  let dy = y, dm = m, dd = d;
+  if(hh === 23){
+    const next = new Date(y, m - 1, d + 1);
+    dy = next.getFullYear();
+    dm = next.getMonth() + 1;
+    dd = next.getDate();
+  }
+
+  let yy = y;
+  if(m < 2 || (m === 2 && d < 4)) yy = y - 1;
+  const yearIdx  = ((yy - 4) % 60 + 60) % 60;
+  const yearGan  = yearIdx % 10;
+  const yearZhi  = yearIdx % 12;
+
+  const jqDays   = {1:6, 2:4, 3:6, 4:5, 5:6, 6:6, 7:7, 8:7, 9:8, 10:8, 11:7, 12:7};
+  const zhiAfter = {1:1, 2:2, 3:3, 4:4, 5:5, 6:6, 7:7, 8:8, 9:9, 10:10, 11:11, 12:0};
+  let mm2 = m;
+  if(d < jqDays[m]){ mm2 = m - 1; if(mm2 === 0) mm2 = 12; }
+  const monthZhi = zhiAfter[mm2];
+  const yinGan   = (yearGan * 2 + 2) % 10;
+  const monthGan = (yinGan + ((monthZhi - 2 + 12) % 12)) % 10;
+
+  const jdn     = calcJDN(dy, dm, dd);
+  const dayIdx  = ((jdn + 49) % 60 + 60) % 60;
+  const dayGan  = dayIdx % 10;
+  const dayZhi  = dayIdx % 12;
+
+  const timeZhi = Math.floor(((hh + 1) % 24) / 2);
+  const timeGan = (dayGan * 2 + timeZhi) % 10;
+
+  return {
+    year : { gan: yearGan,  zhi: yearZhi  },
+    month: { gan: monthGan, zhi: monthZhi },
+    day  : { gan: dayGan,   zhi: dayZhi   },
+    time : { gan: timeGan,  zhi: timeZhi  }
+  };
+}
+
+function countWuXing(bz){
+  const cnt = { 木:0, 火:0, 土:0, 金:0, 水:0 };
+  cnt[GAN_WX[bz.year.gan]]  += 1;
+  cnt[ZHI_WX[bz.year.zhi]]  += 1;
+  cnt[GAN_WX[bz.month.gan]] += 1;
+  cnt[ZHI_WX[bz.month.zhi]] += 1;
+  cnt[GAN_WX[bz.day.gan]]   += 1;
+  cnt[ZHI_WX[bz.day.zhi]]   += 1;
+  cnt[GAN_WX[bz.time.gan]]  += 1;
+  cnt[ZHI_WX[bz.time.zhi]]  += 1;
+  return cnt;
+}
+
+function buildBaziText(bz, cnt){
+  const dmWx = GAN_WX[bz.day.gan];
+  let txt = DAY_MASTER_DESC[dmWx] + ' ';
+
+  const missing = WX_LIST.filter(w => cnt[w] === 0);
+  const strong  = WX_LIST.filter(w => cnt[w] >= 4);
+
+  if(missing.length === 0 && strong.length === 0){
+    txt += '八字五行俱全，分布均衡，格局中正平和。一生运势起伏不大，守中而行，自可安稳顺遂。';
+  } else {
+    if(missing.length > 0){
+      txt += `五行之中${missing.join('、')}偏弱或缺失，`;
+      txt += missing.map(w => ({
+        '木':'宜多接触草木绿意，从事与文化、教育、生发相关之事',
+        '火':'宜多近光明温暖，从事与传播、电子、热力相关之事',
+        '土':'宜多亲近大地山川，从事与地产、建筑、农牧相关之事',
+        '金':'宜多接触金属器物，从事与金融、机械、法务相关之事',
+        '水':'宜多近江河湖海，从事与贸易、物流、传媒相关之事'
+      })[w]).join('；') + '。';
+    }
+    if(strong.length > 0){
+      txt += `而${strong.join('、')}偏旺，`;
+      txt += '旺者宜泄不宜克，宜以柔化刚，凡事留有余地，切忌刚愎自用、一意孤行。';
+    }
+  }
+  return txt;
+}
+
+function renderBaZi(y, m, d, hh){
+  const bz  = computeBaZi(y, m, d, hh);
+  const cnt = countWuXing(bz);
+
+  const pillars = [
+    { label:'年柱', p: bz.year,  cls:'' },
+    { label:'月柱', p: bz.month, cls:'' },
+    { label:'日柱', p: bz.day,   cls:'daymaster' },
+    { label:'时柱', p: bz.time,  cls:'' },
+  ];
+
+  const maxCnt = Math.max(...WX_LIST.map(w => cnt[w]), 1);
+
+  const pillarHtml = pillars.map(item => `
+    <div class="pillar ${item.cls}">
+      <div class="pillar-label">${item.label}</div>
+      <div class="pillar-gan fnt-seal">${GAN[item.p.gan]}</div>
+      <div class="pillar-zhi fnt-seal">${ZHI[item.p.zhi]}</div>
+      <div class="pillar-wx">${GAN_WX[item.p.gan]} · ${ZHI_WX[item.p.zhi]}</div>
+    </div>
+  `).join('');
+
+  const wxHtml = WX_LIST.map(w => {
+    const pct = (cnt[w] / maxCnt) * 100;
+    const cls = {木:'wx-wood',火:'wx-fire',土:'wx-earth',金:'wx-metal',水:'wx-water'}[w];
+    return `
+      <div class="wx-row">
+        <div class="wx-name fnt-seal">${w}</div>
+        <div class="wx-track"><div class="wx-fill ${cls}" data-pct="${pct}"></div></div>
+        <div class="wx-count">${cnt[w]}</div>
+      </div>
+    `;
+  }).join('');
+
+  const readingText = buildBaziText(bz, cnt);
+
+  const baziResultEl = document.getElementById('baziResult');
+
+  baziResultEl.innerHTML = `
+    <div class="bz-inner">
+      <div class="pillars">${pillarHtml}</div>
+
+      <div class="wx-block">
+        <div class="wx-title">五 行 分 布</div>
+        ${wxHtml}
+      </div>
+
+      <div class="bz-read">
+        <div class="v-label">日 主 与 格 局</div>
+        <div class="v-text">${readingText}</div>
+      </div>
+
+      <div class="bz-summary">
+        八字为先天之数，运程为后天之变。<br>
+        知命而不认命，修身以补不足，方为智者。
+      </div>
+    </div>
+  `;
+
+  baziResultEl.classList.remove('show');
+  void baziResultEl.offsetWidth;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      baziResultEl.classList.add('show');
+
+      setTimeout(() => {
+        baziResultEl.querySelectorAll('.wx-fill').forEach(el => {
+          el.style.width = el.dataset.pct + '%';
+        });
+      }, 380);
+    });
+  });
+
+  setTimeout(() => {
+    const rect = baziResultEl.getBoundingClientRect();
+    if(rect.bottom > window.innerHeight){
+      baziResultEl.scrollIntoView({ behavior:'smooth', block:'end' });
+    }
+  }, 400);
+}
+
+const baziBtn = document.getElementById('baziBtn');
+let baziBusy = false;
+
+baziBtn.addEventListener('click', async () => {
+  if(baziBusy) return;
+
+  const dateVal = document.getElementById('birthDate').value;
+  const timeVal = document.getElementById('birthTime').value || '12:00';
+
+  if(!dateVal){
+    toast('请选择出生日期');
+    return;
+  }
+
+  const parts = dateVal.split('-').map(Number);
+  const y = parts[0], m = parts[1], d = parts[2];
+  const hh = Number(timeVal.split(':')[0]);
+
+  if(y < 1900 || y > 2100){
+    toast('年份需在 1900 至 2100 之间');
+    return;
+  }
+
+  baziBusy = true;
+  baziBtn.disabled = true;
+  baziBtn.textContent = '推演中…';
+
+  await sleep(620);
+
+  renderBaZi(y, m, d, hh);
+
+  baziBusy = false;
+  baziBtn.disabled = false;
+  baziBtn.textContent = '重 新 排 盘';
+});
+</script>
+</body>
+</html>

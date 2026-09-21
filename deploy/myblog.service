@@ -1,0 +1,78 @@
+# systemd 服务单元。安装位置：/etc/systemd/system/myblog.service
+# 由 deploy/install-server.sh 自动写入，一般不需要手动改。
+#
+# 用 systemd 而不是 PM2：不额外吃一份常驻内存（2GB 的机器上这点很重要），
+# 开机自启、崩溃重启、日志归 journald 一并解决。
+
+[Unit]
+Description=My Blog (Next.js standalone)
+Documentation=https://nextjs.org/docs/app/guides/self-hosting
+After=network-online.target
+Wants=network-online.target
+
+# 崩溃循环时不要无限重启，给运维留出介入空间。
+# 注意：这两个键属于 [Unit] 段 —— 放进 [Service] 会被 systemd 忽略
+# （日志里会报 "Unknown key ... ignoring"），限制就形同虚设。
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=myblog
+Group=myblog
+WorkingDirectory=/opt/myblog/current
+
+# 密钥与可变配置都在这里。这个文件在 releases/ 之外，重新部署不会覆盖。
+EnvironmentFile=/opt/myblog/shared/blog.env
+
+Environment=NODE_ENV=production
+
+# 只监听回环，由反向代理对外。这样应用本身不直接暴露在公网。
+# 【B 线：没备案、用 IP:高位端口直连时】把 HOSTNAME 改成 0.0.0.0，
+# 并把 PORT 改成一个高位端口（如 8080），同时记得在 blog.env 里设 COOKIE_SECURE=false。
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+
+# 内容目录必须在产物之外 —— 这是整条部署链最重要的一条边界。
+Environment=CONTENT_DIR=/opt/myblog/content
+
+# 堆上限 512MB。
+#
+# 这台机器上还跑着 1Panel（agent + core 约 170MB）、Docker（dockerd + containerd
+# 约 175MB）和 1Panel 的 openresty 容器，实测可用内存约 1.1GB。
+# 博客本身用不了多少堆，512MB 绰绰有余 —— 宁可留出余量，
+# 也不要让 Node 和面板抢内存。真出现堆不足（日志里有 OOM / GC 告警）再往上调。
+#
+# 注意：PORT / HOSTNAME / 堆参数都**不能**写在 .env 里 ——
+# Next 的 server.js 在任何 .env 加载之前就读了 PORT。
+ExecStart=/usr/bin/node --max-old-space-size=512 server.js
+
+Restart=always
+RestartSec=3
+
+# 兜底：万一内存泄漏，宁可让服务被内核杀掉重启，也别拖垮整台机器（那样 SSH 都进不去）
+#
+# 上限压在 800M 是为了给 1Panel / Docker 留活路 —— 这台机器不是博客独占的。
+MemoryMax=800M
+MemoryHigh=640M
+
+# —— 安全加固 ——
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# 整个 /opt/myblog 可写：应用需要写 content/，Next 偶尔也要写 .next/cache
+ReadWritePaths=/opt/myblog
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+
+# 日志走 journald，用 journalctl -u myblog 查看
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myblog
+
+[Install]
+WantedBy=multi-user.target

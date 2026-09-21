@@ -1,0 +1,1401 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* 暗色模式走 class，主题可被用户手动切换并记住 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==================================================================
+ * 设计令牌 —— 墨玉青瓷
+ *
+ * 全站只有一个彩色（青玉），其余全是中性墨阶。
+ * 颜色收敛之后，排版和材质才会被看见。
+ * ================================================================== */
+@theme {
+  --color-ink: #0f1720;
+  --color-ink-soft: #33414d;
+  --color-ink-muted: #64748b;
+  --color-ink-faint: #94a3b8;
+  /* 底色刻意不用接近纯白 —— 液态玻璃需要"背后有东西"才看得见，
+     纯白背景上的白色玻璃等于隐形。 */
+  --color-paper: #eaf3f2;
+  --color-paper-deep: #dfeceb;
+
+  --color-jade: #0d9488;
+  --color-jade-deep: #0f766e;
+  --color-jade-bright: #14b8a6;
+  --color-jade-pale: #5eead4;
+  --color-jade-wash: rgb(13 148 136 / 0.08);
+
+  /* 圆角分三级，不再一律大圆角 —— 同一个圆角套到底是"模板感"的直接来源 */
+  --radius-panel: 1.75rem;
+  --radius-card: 1.125rem;
+  --radius-tile: 0.625rem;
+
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN",
+    "Songti SC", "STSong", "SimSun", "宋体", Georgia, serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "微软雅黑", "Hiragino Sans GB", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code",
+    Consolas, "Courier New", monospace;
+
+  /*
+   * 缓动曲线。
+   *
+   * 上一版全站只有一条 cubic-bezier(.22, 1, .36, 1)，那是"急停"曲线：
+   * 前 20% 的时间就跑完 83% 的位移，观感是"啪"地弹到位然后慢慢蹭。
+   * 这正是"生硬"的来源 —— 不是没有过渡，而是过渡的节奏不对。
+   *
+   * 现在按用途分三条：
+   *   smooth  平衡的加减速，配色/透明度/阴影这类渐变用它
+   *   spring  末段带一点回弹，用于位移（悬停抬起、图标滑动）—— 有"活"的手感
+   *   glide   长距离位移用，收尾更柔，不会在终点突然刹住
+   */
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --ease-glide: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* ==================================================================
+ * 基础层
+ * ================================================================== */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: var(--font-serif);
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 900ms var(--ease-smooth), color 900ms var(--ease-smooth);
+  }
+
+  .dark body {
+    background-color: #080d0e;
+    color: #e2e8f0;
+  }
+
+  h1, h2, h3, h4 {
+    font-weight: 900;
+    letter-spacing: -0.025em;
+  }
+
+  ::selection {
+    background-color: rgb(13 148 136 / 0.24);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-jade);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  /*
+   * 所有可交互元素默认带过渡。
+   * 之前的问题是只有个别元素写了 transition，剩下的颜色/位移都是硬切，
+   * 鼠标扫过去一片"啪嗒啪嗒"的跳变。
+   * 放在 base 层，Tailwind 的 transition-* 工具类仍然可以覆盖它。
+   */
+  a, button, summary, [role="button"], input, select, textarea {
+    transition:
+      color 320ms var(--ease-smooth),
+      background-color 320ms var(--ease-smooth),
+      border-color 320ms var(--ease-smooth),
+      box-shadow 320ms var(--ease-smooth),
+      opacity 320ms var(--ease-smooth),
+      transform 420ms var(--ease-spring);
+  }
+
+  /* 按下时的即时反馈。过渡再顺滑，没有"按下去"的手感也是飘的 */
+  button:not(:disabled):active,
+  [role="button"]:active {
+    transform: scale(0.97);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(13 148 136 / 0.28) transparent;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(13 148 136 / 0.28);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(13 148 136 / 0.7); }
+
+  .tnum {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* ==================================================================
+ * 液态玻璃
+ *
+ * 亮色下"看不见玻璃"的根因不是模糊不够，而是**背后没有东西可折射**：
+ * 原来纸白底 + 白色玻璃 = 白上白。所以这里做了两件事：
+ *   1. 降低玻璃自身的白色填充（0.25~0.55），让背景的彩色透进来被模糊
+ *   2. 背景改成有颜色的青瓷水色（见 Backgrounds 组件），玻璃才有内容可"透"
+ * 另外补了两处物理细节：
+ *   - 顶部一道近乎不透明的亮棱（光线打在玻璃上沿）
+ *   - 底棱略暗的反光 + 更实的投影（玻璃有厚度才有影子）
+ *
+ * 刻意没有 will-change: backdrop-filter —— 参考项目给所有带 backdrop-blur 的
+ * 元素都强加了它，十几张卡片全被提升为独立合成层，得不偿失。
+ * ================================================================== */
+@layer components {
+  .glass {
+    position: relative;
+    /*
+     * 建立层叠上下文。这样镜面高光的伪元素才能用 z-index: -1 沉到内容**下面** ——
+     * 否则它（作为定位元素）会盖在正文之上，悬停时那团白光会把文字洗掉。
+     * 绘制顺序：自身背景 → z-index 负值子元素 → 普通流内容 → 定位元素。
+     */
+    isolation: isolate;
+    border-radius: var(--radius-card);
+    background-image: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 0.55) 0%,
+      rgb(255 255 255 / 0.22) 48%,
+      rgb(255 255 255 / 0.42) 100%
+    );
+    /* saturate 提到 200% 是玻璃感的关键：透过去的颜色要更浓，才像折射而不是雾 */
+    backdrop-filter: blur(20px) saturate(200%);
+    -webkit-backdrop-filter: blur(20px) saturate(200%);
+    box-shadow:
+      /* 顶棱亮线 */
+      inset 0 1px 0 rgb(255 255 255 / 1),
+      inset 1px 0 0 rgb(255 255 255 / 0.45),
+      /* 底棱反光 */
+      inset 0 -1px 0 rgb(255 255 255 / 0.5),
+      /* 贴地的一层浅影，把玻璃从背景上"抬"起来 */
+      0 2px 5px -1px rgb(15 23 32 / 0.07),
+      /* 主投影 */
+      0 14px 34px -10px rgb(15 23 32 / 0.2);
+    /* 阴影用 smooth（渐变类），位移用 spring（带一点回弹，才有"活"的手感）。
+       时长给到 560ms —— 配上 spring 曲线，这个长度是"从容"而不是"拖沓"。 */
+    transition:
+      box-shadow 560ms var(--ease-smooth),
+      transform 560ms var(--ease-spring),
+      border-color 560ms var(--ease-smooth);
+  }
+
+  /* 边缘折射：1px 的渐变描边。用 mask 挖空中间，
+     比 border-image 可控，圆角处也不会露馅。 */
+  .glass::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 1) 0%,
+      rgb(13 148 136 / 0.25) 30%,
+      rgb(255 255 255 / 0.3) 62%,
+      rgb(255 255 255 / 0.9) 100%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .dark .glass {
+    background-image: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 0.1) 0%,
+      rgb(255 255 255 / 0.03) 48%,
+      rgb(255 255 255 / 0.07) 100%
+    );
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.16),
+      inset 0 -1px 0 rgb(255 255 255 / 0.05),
+      0 2px 6px -1px rgb(0 0 0 / 0.4),
+      0 16px 40px -12px rgb(0 0 0 / 0.7);
+  }
+
+  .dark .glass::after {
+    background: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 0.26) 0%,
+      rgb(45 212 191 / 0.18) 35%,
+      rgb(255 255 255 / 0.06) 68%,
+      rgb(255 255 255 / 0.2) 100%
+    );
+  }
+
+  /* 更厚的一层：正文、侧栏面板这类需要压住背景的地方 */
+  .glass-xl {
+    position: relative;
+    isolation: isolate; /* 同上：让高光层沉到内容下方 */
+    border-radius: var(--radius-panel);
+    background-image: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 0.72) 0%,
+      rgb(255 255 255 / 0.44) 50%,
+      rgb(255 255 255 / 0.6) 100%
+    );
+    backdrop-filter: blur(30px) saturate(210%);
+    -webkit-backdrop-filter: blur(30px) saturate(210%);
+    box-shadow:
+      inset 0 1.5px 0 rgb(255 255 255 / 1),
+      inset 1px 0 0 rgb(255 255 255 / 0.5),
+      inset 0 -1px 0 rgb(255 255 255 / 0.55),
+      0 3px 7px -2px rgb(15 23 32 / 0.08),
+      0 26px 60px -20px rgb(15 23 32 / 0.28);
+    transition:
+      box-shadow 560ms var(--ease-smooth),
+      transform 560ms var(--ease-spring),
+      border-color 560ms var(--ease-smooth);
+  }
+
+  .glass-xl::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 1) 0%,
+      rgb(13 148 136 / 0.28) 28%,
+      rgb(255 255 255 / 0.34) 60%,
+      rgb(255 255 255 / 0.95) 100%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .dark .glass-xl {
+    background-image: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 0.11) 0%,
+      rgb(255 255 255 / 0.035) 50%,
+      rgb(255 255 255 / 0.08) 100%
+    );
+    backdrop-filter: blur(30px) saturate(190%);
+    -webkit-backdrop-filter: blur(30px) saturate(190%);
+    box-shadow:
+      inset 0 1.5px 0 rgb(255 255 255 / 0.18),
+      inset 0 -1px 0 rgb(255 255 255 / 0.05),
+      0 3px 8px -2px rgb(0 0 0 / 0.5),
+      0 26px 64px -20px rgb(0 0 0 / 0.75);
+  }
+
+  .dark .glass-xl::after {
+    background: linear-gradient(
+      145deg,
+      rgb(255 255 255 / 0.3) 0%,
+      rgb(45 212 191 / 0.2) 32%,
+      rgb(255 255 255 / 0.07) 66%,
+      rgb(255 255 255 / 0.22) 100%
+    );
+  }
+
+  /*
+   * 指针跟随的镜面高光。
+   * --mx/--my 由 <MotionRoot> 写入。只在真有指针的设备上生效 ——
+   * 触摸屏没有 hover，白算一遍没意义。
+   */
+  @media (hover: hover) and (pointer: fine) {
+    .glass-spec::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(
+        460px circle at var(--mx, 50%) var(--my, 0%),
+        rgb(255 255 255 / 0.75),
+        rgb(120 220 210 / 0.22) 32%,
+        transparent 60%
+      );
+      opacity: 0;
+      transition: opacity 550ms var(--ease-smooth);
+      pointer-events: none;
+      /* 负值：沉到卡片内容下面，只照亮玻璃本身，不糊住文字 */
+      z-index: -1;
+    }
+
+    .dark .glass-spec::before {
+      background: radial-gradient(
+        460px circle at var(--mx, 50%) var(--my, 0%),
+        rgb(94 234 212 / 0.2),
+        rgb(255 255 255 / 0.06) 36%,
+        transparent 62%
+      );
+    }
+
+    .glass-spec:hover::before { opacity: 1; }
+  }
+
+  /* 可点击卡片：抬起 + 投影加深 + 一道青玉色的辉光。
+     三者同时过渡，才不会像"啪"地跳一下。 */
+  .glass-hover { cursor: pointer; }
+
+  /* 抬起幅度给足：只抬 3-4px 在视觉上几乎看不出来，
+     配合 spring 曲线的轻微过冲，6px 才有明确的"被托起来"的感觉 */
+  .glass-hover:hover {
+    transform: translateY(-6px) scale(1.012);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 1),
+      inset 1px 0 0 rgb(255 255 255 / 0.5),
+      inset 0 -1px 0 rgb(255 255 255 / 0.5),
+      0 3px 8px -2px rgb(15 23 32 / 0.08),
+      0 26px 52px -16px rgb(15 23 32 / 0.26),
+      0 0 0 1px rgb(13 148 136 / 0.12),
+      0 8px 30px -6px rgb(13 148 136 / 0.18);
+  }
+
+  .dark .glass-hover:hover {
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.22),
+      inset 0 -1px 0 rgb(255 255 255 / 0.07),
+      0 3px 8px -2px rgb(0 0 0 / 0.5),
+      0 26px 52px -16px rgb(0 0 0 / 0.8),
+      0 0 0 1px rgb(45 212 191 / 0.16),
+      0 8px 30px -6px rgb(45 212 191 / 0.14);
+  }
+
+  /*
+   * 列表行悬停：一块从中间"长"出来的柔光垫。
+   * 用伪元素 + opacity/transform 过渡 —— 直接改行的背景色会很生硬，
+   * 而且下面还有分隔线要保留。
+   */
+  .row-hover {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .row-hover::before {
+    content: "";
+    position: absolute;
+    inset: 0.25rem -0.9rem;
+    z-index: -1;
+    border-radius: var(--radius-card);
+    background: linear-gradient(
+      100deg,
+      rgb(255 255 255 / 0.85),
+      rgb(214 244 240 / 0.5) 65%,
+      transparent
+    );
+    opacity: 0;
+    transform: scale(0.94);
+    transition:
+      opacity 460ms var(--ease-smooth),
+      transform 520ms var(--ease-spring);
+    pointer-events: none;
+  }
+
+  .row-hover:hover::before {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .dark .row-hover::before {
+    background: linear-gradient(
+      100deg,
+      rgb(255 255 255 / 0.07),
+      rgb(45 212 191 / 0.06) 65%,
+      transparent
+    );
+  }
+
+  /* 悬停时标题右移，给一点"被拉动"的方向感 */
+  .row-shift {
+    transition:
+      transform 520ms var(--ease-spring),
+      color 320ms var(--ease-smooth);
+  }
+  .row-hover:hover .row-shift {
+    transform: translateX(6px);
+  }
+
+  /* 序号：悬停时向后让位并染成青玉色 */
+  .row-hover .index-num {
+    transition:
+      color 320ms var(--ease-smooth),
+      transform 520ms var(--ease-spring);
+  }
+  .row-hover:hover .index-num {
+    color: var(--color-jade);
+    transform: translateX(-3px) scale(1.15);
+  }
+  .dark .row-hover:hover .index-num { color: var(--color-jade-pale); }
+
+  /* 日期：悬停时从不显眼浮上来 */
+  .row-hover .row-date {
+    transition:
+      color 480ms var(--ease-smooth),
+      transform 520ms var(--ease-spring);
+  }
+  .row-hover:hover .row-date {
+    color: var(--color-jade);
+    transform: translateX(-4px);
+  }
+  .dark .row-hover:hover .row-date { color: var(--color-jade-pale); }
+
+  /* ── 版面元素 ── */
+
+  .rule-label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+  .rule-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, currentColor, transparent);
+    opacity: 0.4;
+  }
+  .dark .rule-label { color: #64748b; }
+
+  .display {
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    line-height: 0.95;
+  }
+
+  /* 序号 01 / 02 / 03。悬停时的变化定义在上面 .row-hover 那一段里。 */
+  .index-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    color: var(--color-ink-faint);
+  }
+
+  /*
+   * 「正在播放」卡片里那一句歌词。
+   * 组件在换行时改 key 让 React 重挂载这个元素，动画就重放一次 ——
+   * 只做透明度，不做位移，原因见下面 @keyframes lyric-in 的说明。
+   */
+  .lyric-line {
+    animation: lyric-in 320ms var(--ease-glide);
+  }
+
+  /*
+   * 「正在唱的那一句」的柔和发光。
+   *
+   * 用 currentColor 而不是写死色值 —— 舞台那句用的是封面提出来的主色、
+   * 侧栏卡片那句用的是主题青玉色，同一个类两边都能用，换色不用改这里。
+   *
+   * 三层而不是一层：贴着一层薄的勾出字形轮廓，中间一层晕开，
+   * 最外面铺一大片很淡的光。只有一层的话，要么细得像描边，要么糊成一团。
+   * 越往外 alpha 越低是"柔和"的关键 —— 三层都实的话会变成霓虹灯管。
+   */
+  /*
+   * 静态发光。侧栏那张卡片用 —— 它只显示当前一句、而且换句时整块重挂载，
+   * 过渡本来就用不上，直接常亮最简单。
+   */
+  .lyric-glow {
+    text-shadow:
+      0 0 4px currentColor,
+      0 0 12px currentColor,
+      0 0 26px currentColor;
+  }
+
+  /*
+   * ══ 舞台歌词的发光（会亮起来的那一句）══
+   *
+   * ★ 用伪元素的 **opacity** 过渡，**绝不要去过渡 text-shadow**。
+   *
+   * 这一条是实测撞出来的。我试过两种"让 text-shadow 可插值"的写法，
+   * 在这台浏览器上**都不成立**：
+   *
+   *   ① 两端层数对齐（`none` ↔ 三层）—— 仍然离散跳变
+   *   ② 两端都用 color-mix 把颜色序列化成同一种类型
+   *      （`color(srgb … / 0.01)` ↔ `color(srgb …)`）—— 仍然不行
+   *
+   * 受控实验的轨迹（脱离 React 的元素，25ms 采一次）：
+   *
+   *   起点  0.01 / 0.01 / 0.01
+   *   中间  rgba(0,0,0,0)  ← 整个 700ms 过渡期间恒为全透明
+   *   终点  1 / 0.62 / 0.34 ← 到点才跳过去
+   *
+   * 也就是说过渡"在跑"（`getAnimations()` 看得到），但中间帧压根不插值。
+   * 而 `opacity` 是所有浏览器都保证插值的，还走合成器。
+   * 所以把发光画在一个覆盖层上，只动它的透明度。
+   *
+   * `-webkit-text-fill-color: transparent` 让覆盖层**只留下阴影、不叠字** ——
+   * 否则同一句话会被画两遍，看着比别的行粗一圈。
+   * （`text-shadow` 用的是各自的 `currentColor`，不受 text-fill-color 影响。）
+   */
+  .lyric-halo {
+    position: relative;
+  }
+
+  .lyric-halo::after {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    /*
+     * ★ 必须继承内边距，否则发光会比文字**高出一截**。
+     *
+     * 绝对定位元素的包含块是父元素的**内边距盒**（padding box），
+     * 所以 `inset: 0` 让发光层从内边距外沿开始排字 —— 而 `<p>` 带着
+     * `py-2`（上下各 8px），真正的文字在内容盒里，比它低 8px。
+     * 于是发光整体偏上，成了一个单方向的拖影，看着像散光。
+     *
+     * `padding: inherit` 让发光层拿到同一份内边距，两者内容盒就重合了。
+     * 用 inherit 而不是写死 8px：激活与未激活的内边距不同（py-2 / py-1），
+     * 写死会顾此失彼。
+     */
+    padding: inherit;
+    -webkit-text-fill-color: transparent;
+    text-shadow:
+      0 0 6px currentColor,
+      0 0 18px currentColor,
+      0 0 40px currentColor;
+    opacity: 0;
+    transition: opacity 700ms var(--ease-glide);
+    pointer-events: none;
+  }
+
+  .lyric-halo-on::after {
+    opacity: 0.6;
+  }
+
+  /* 主按钮：悬停时内部有一道高光扫过 */
+  .btn-primary {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .btn-primary::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    width: 40%;
+    background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.35), transparent);
+    transform: translateX(-160%) skewX(-12deg);
+    transition: transform 700ms var(--ease-smooth);
+    pointer-events: none;
+  }
+  .btn-primary:hover::after { transform: translateX(320%) skewX(-12deg); }
+}
+
+/* ==================================================================
+ * 正文排版
+ * ================================================================== */
+.prose { --tw-prose-links: var(--color-jade); }
+
+.dark .prose {
+  --tw-prose-body: #cbd5e1;
+  --tw-prose-headings: #fff;
+  --tw-prose-links: var(--color-jade-pale);
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  scroll-margin-top: 6rem;
+}
+
+.prose h1 { font-size: 1.9rem; line-height: 1.25; }
+.prose h2 { font-size: 1.5rem; line-height: 1.35; }
+.prose h3 { font-size: 1.2rem; }
+.prose p  { line-height: 1.9; }
+
+@media (min-width: 768px) {
+  .prose h1 { font-size: 2.8rem; line-height: 1.1; }
+  .prose h2 { font-size: 2rem; }
+  .prose h3 { font-size: 1.4rem; }
+  .prose p  { font-size: 1.08rem; }
+}
+
+.prose a {
+  color: var(--color-jade);
+  border-bottom: 1px solid rgb(13 148 136 / 0.4);
+  text-decoration: none;
+}
+.prose a:hover {
+  color: var(--color-jade-deep);
+  border-bottom-color: var(--color-jade);
+  background-color: var(--color-jade-wash);
+}
+.dark .prose a {
+  color: var(--color-jade-pale);
+  border-bottom-color: rgb(94 234 212 / 0.35);
+}
+.dark .prose a:hover {
+  color: #99f6e4;
+  border-bottom-color: var(--color-jade-pale);
+  background-color: rgb(45 212 191 / 0.1);
+}
+
+.prose blockquote {
+  border-left: 2px solid rgb(13 148 136 / 0.35);
+  padding: 0.25rem 0 0.25rem 1.5rem;
+  margin: 1.75rem 0;
+  font-style: normal;
+  color: var(--color-ink-soft);
+}
+.dark .prose blockquote {
+  border-left-color: rgb(45 212 191 / 0.3);
+  color: #cbd5e1;
+}
+.prose blockquote p::before,
+.prose blockquote p::after { content: none; }
+
+.prose pre {
+  background-color: #0d1416;
+  color: #b8c4c4;
+  padding: 1.1rem 1.35rem;
+  border-radius: var(--radius-tile);
+  overflow-x: auto;
+  box-shadow: inset 0 0 0 1px rgb(45 212 191 / 0.12);
+}
+.prose pre code { background: none; padding: 0; font-weight: 400; }
+
+.prose :not(pre) > code {
+  background-color: var(--color-jade-wash);
+  color: var(--color-jade-deep);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+  font-weight: 600;
+  font-size: 0.86em;
+}
+.dark .prose :not(pre) > code {
+  background-color: rgb(45 212 191 / 0.14);
+  color: var(--color-jade-pale);
+}
+.prose code::before,
+.prose code::after { content: none; }
+
+.prose img {
+  display: block;
+  margin: 1.75rem auto;
+  border-radius: var(--radius-tile);
+  box-shadow: 0 12px 34px -12px rgb(15 23 32 / 0.3);
+  max-width: 100%;
+  height: auto;
+}
+
+.prose table {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.prose input[type="checkbox"] {
+  margin-right: 0.4rem;
+  accent-color: var(--color-jade);
+}
+.prose li.task-list-item { list-style: none; }
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+}
+
+/* ==================================================================
+ * 滚动入场
+ * ================================================================== */
+/*
+ * 滚动入场 —— 纯 CSS 的滚动驱动动画，不掺任何 JavaScript。
+ *
+ * 前面两版都栽在这儿：
+ *   第一版：.reveal 默认 opacity:0，靠 JS 加 .is-visible 点亮。
+ *           JS 一挂整页白屏。
+ *   第二版：把隐藏状态挂在 .js 之下，但"点亮"仍然是 JS 改 class ——
+ *           **那是在改 React 管的 DOM**。React 不知道这件事，
+ *           切页重新渲染时发现 DOM 与预期不符，报水合错误并放弃修补，
+ *           内容就卡在隐藏状态，又白屏了。
+ *
+ * 现在换成 animation-timeline: view()：动画进度直接绑定元素在视口中的位置，
+ * 由浏览器合成器驱动。没有 JS、没有 DOM 篡改、没有水合冲突，
+ * 而且不占主线程。
+ *
+ * 不支持的浏览器（Firefox）由 @supports 兜住 —— 规则整段不生效，
+ * 元素就是普通可见状态，只是少了动画。这正是我们想要的降级。
+ */
+@supports (animation-timeline: view()) {
+  .reveal {
+    animation: reveal-in linear both;
+    animation-timeline: view();
+    /* 元素从刚露头到露出 55% 的这段距离里完成动画 */
+    animation-range: entry 0% entry 55%;
+  }
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ==================================================================
+ * 主题切换的全站过渡 —— **兜底路径**
+ *
+ * 现代浏览器（Chrome / Edge / Safari，含手机端）切主题走的是
+ * View Transitions，见下面 @supports 里的 .theme-vt 那一段：
+ * 那套只在合成器上淡入一张快照，不重绘、不重算模糊。
+ *
+ * 下面这段是给不支持 VT 的浏览器（目前主要是 Firefox）准备的退路。
+ * 它能work，但**很贵**：background-color / color / border-color 都是
+ * "绘制"属性，合成器帮不上忙，每一帧都要把整页重画一遍。
+ * 手机 GPU 扛不住这种量级 —— 这也是之前移动端切主题又卡又闪的根因。
+ * ================================================================== */
+/*
+ * 只过渡颜色类属性。
+ *
+ * 之前连 box-shadow 和 background-image 一起过渡，那是"卡"的来源：
+ *   - 本站玻璃元素多，每个都有 5~7 层 box-shadow，全站一起重算是很重的开销
+ *   - background-image 是渐变，浏览器根本无法插值，纯属白算
+ * 时长也从 620ms 收到 480ms —— 颜色渐变不需要那么久。
+ */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition:
+    background-color 420ms var(--ease-smooth),
+    color 420ms var(--ease-smooth),
+    border-color 420ms var(--ease-smooth),
+    fill 420ms var(--ease-smooth),
+    stroke 420ms var(--ease-smooth) !important;
+  transition-delay: 0ms !important;
+}
+
+/*
+ * 背景层**不参与**颜色过渡，一次性切换。
+ *
+ * 这是主题切换掉帧的关键，得从渲染原理上讲：
+ * backdrop-filter 是"把背后的内容模糊后当作自己的背景"。只要背后的颜色在逐帧变化，
+ * 浏览器就必须**每一帧重新计算一次模糊** —— 本站有两块 30px 模糊的大面板加导航栏，
+ * 每帧重算这个半径的开销非常可观，表现出来就是一卡一卡。
+ *
+ * 让背景瞬间切换，模糊就只需要算一次；前景（文字、边框、卡片自身的底色）照常渐变。
+ * 代价是底色是"跳"过去的，但这个取舍是值得的 —— 顺滑比底色渐变重要得多。
+ *
+ * 想连底色也做真正的交叉淡入，只能靠 View Transitions：
+ * 浏览器对整页拍两次快照后在合成器上淡入淡出，模糊已经烘进快照里，不需要逐帧重算。
+ * 但那套伪元素目前和页面切换的过渡共用，会互相干扰，所以这里不做。
+ */
+.theme-switching body,
+.theme-switching .decor {
+  transition: none !important;
+}
+
+/*
+ * 例外：主题图标要保住自己的位移与透明度过渡。
+ * 上面那条 !important 会把 transition 整个替换掉，
+ * 图标的旋转和淡入淡出就没了 —— 而那恰好是最该顺滑的一处。
+ * 用更高的选择器优先级把它抢回来。
+ */
+.theme-switching .theme-icon {
+  transition:
+    opacity 420ms var(--ease-smooth),
+    transform 560ms var(--ease-spring),
+    color 620ms var(--ease-smooth) !important;
+}
+
+/* JS 被禁用或还没加载时，别把内容永久藏起来 */
+@media (scripting: none) {
+  .reveal { opacity: 1; transform: none; }
+}
+
+/* ==================================================================
+ * 页面切换
+ *
+ * <PageTransition> 以 pathname 为 key，路由一变就重新挂载，
+ * 动画因此重新播放一遍。没有用 View Transitions API ——
+ * 它在 Next 里绑在 experimental 运行时上，可控性差；
+ * 这个方案确定有效，且退场/入场节奏完全自己说了算。
+ * ================================================================== */
+.page-enter {
+  animation: page-enter 640ms var(--ease-glide) both;
+}
+
+/*
+ * View Transitions（Next 16 的 experimental.viewTransition 已开启）
+ *
+ * 浏览器支持时由它接管页面切换：旧页面淡出、新页面淡入，是**真正的交叉过渡**。
+ * 之前的方案只有入场动画、旧内容是瞬间消失的，这正是"切页生硬"的原因。
+ *
+ * @supports 里同时把 .page-enter 的动画关掉 —— 否则会和 VT 叠成两层淡入。
+ * 不支持 VT 的浏览器（Firefox）走 .page-enter 那套，仍然有入场动画。
+ */
+@supports (view-transition-name: none) {
+  .page-enter {
+    animation: none;
+  }
+
+  /*
+   * 导航栏和背景层不参与整页过渡 —— 它们在路由切换时本来就不该动。
+   * 给它们单独一个 view-transition-name，浏览器就会把它们排除在 root 快照之外，
+   * 再把这个分组的动画全部关掉，它们就完全静止了。
+   */
+  header {
+    view-transition-name: site-header;
+  }
+  ::view-transition-group(site-header) {
+    animation: none;
+  }
+  ::view-transition-old(site-header) {
+    display: none;
+  }
+  ::view-transition-new(site-header) {
+    animation: none;
+  }
+
+  /* 旧页面：向上淡出并轻微虚化，像被推远 */
+  ::view-transition-old(root) {
+    animation: vt-out var(--vt-out-duration) var(--ease-smooth) both;
+  }
+
+  /* 新页面：从下方浮上来并"对焦" —— 模糊到清晰这一段是质感的关键 */
+  ::view-transition-new(root) {
+    animation: vt-in var(--vt-in-duration) var(--ease-glide) both;
+  }
+
+  /*
+   * ── 主题切换（html.theme-vt）──────────────────────────────────
+   *
+   * 切日夜**也**走 View Transitions，这是移动端能不能顺滑的分水岭。
+   *
+   * 之前的做法是给所有元素挂颜色过渡（.theme-switching *），但
+   * background-color / color / border-color 全是"绘制"属性，合成器帮不上忙 ——
+   * 每一帧都得把整页重新画一遍；玻璃元素底下的颜色在变，还得再重算一次
+   * backdrop-filter 的模糊。桌面端扛得住，手机 GPU 直接跪，元素越多越惨。
+   *
+   * 换成 VT 之后：浏览器对切换前后各拍一张快照，剩下只是在合成器上
+   * 把新快照淡入旧快照 —— 不重绘、不重模糊，开销与元素数量无关。
+   *
+   * 代价是切换按钮里日/月图标的旋转被快照吃掉了。那点细节不值得
+   * 拿整页掉帧去换。
+   */
+
+  /* 旧快照保持不透明：只让新的淡入，全程不会透出底下的页面背景 */
+  html.theme-vt::view-transition-old(root) {
+    animation: none;
+  }
+
+  html.theme-vt::view-transition-new(root) {
+    animation: theme-vt-in var(--theme-vt-in) var(--ease-smooth) both;
+  }
+
+  /*
+   * 导航栏在**页面切换**时是静止分组（见上面），但主题切换必须让它跟着一起淡 ——
+   * 否则整页在渐变、只有导航栏"啪"地换了色，反而更扎眼。
+   * 切主题时把它的 view-transition-name 摘掉，它就重新并回 root 快照里了。
+   *
+   * 注意：这条必须在 startViewTransition **之前**生效（JS 里加了类再强制回流），
+   * 否则浏览器拍下的"旧"快照里导航栏还是独立分组。
+   */
+  html.theme-vt header {
+    view-transition-name: none;
+  }
+}
+
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.994);
+    filter: blur(7px);
+  }
+}
+
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(9px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+/* 主题切换：纯透明度，不做位移也不做模糊。
+   位移会让"换了个主题"看起来像"换了个页面"，模糊则纯属多余 ——
+   两张快照本来就是一像素对齐的。 */
+@keyframes theme-vt-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ==================================================================
+ * 开屏动画
+ * ================================================================== */
+.splash-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-paper);
+
+  /*
+   * 纯 CSS 的兜底退场。
+   *
+   * 开屏是全屏不透明的遮罩，正常情况下由 JS 在进度走完后移除。
+   * 但万一 JS 在浏览器里挂了，它会永远盖住整站 —— 用户看到的就是一片空白，
+   * 而且完全没法自己救回来。
+   *
+   * 这条动画和 JS 无关：无论发生什么，6 秒后遮罩都会自己淡出并让出交互。
+   * JS 正常时早就把它卸载了，这条不会有机会执行。
+   */
+  animation: splash-auto-hide 400ms var(--ease-smooth) 6s forwards;
+}
+
+@keyframes splash-auto-hide {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.dark .splash-root { background-color: #080d0e; }
+
+.splash-root.is-leaving {
+  animation: splash-exit 700ms var(--ease-smooth) forwards;
+  pointer-events: none;
+}
+
+/* 站点名逐字亮起。每个字一个 span，用 animation-delay 依次点亮。 */
+.splash-char {
+  display: inline-block;
+  opacity: 0;
+  animation: splash-char 620ms var(--ease-smooth) forwards;
+}
+
+/* 头像外的光环 */
+.splash-halo {
+  animation: splash-halo 3.4s ease-in-out infinite;
+}
+
+/* 进度条：宽度由 JS 控制，这里只负责它的光泽 */
+.splash-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.splash-bar::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.7), transparent);
+  animation: splash-shimmer 1.3s ease-in-out infinite;
+}
+
+/* ==================================================================
+ * 无障碍：尊重"减少动态效果"
+ * ================================================================== */
+/*
+ * 减少动效偏好下的行为，分三级。
+ * 由 <html> 上的 class（来自后台设置）+ 系统偏好共同决定：
+ *
+ *   （默认）      跟随系统 —— 去掉大范围位移、模糊、粒子、开屏，
+ *                 但**保留**颜色渐变和轻微的悬停抬起。
+ *                 后者不会引起前庭不适，一刀切地全杀掉只会让页面又硬又廉价。
+ *   .motion-full  忽略系统偏好，全部效果照常
+ *   .motion-off   全部关闭
+ *
+ * 上一版是 `* { transition-duration: .01ms !important }` 一把梭，
+ * 连 320ms 的颜色渐变都杀 —— 对谁都没好处，还让整站显得生硬。
+ */
+
+/* view-transition 的时长用自定义属性控制：
+   那组伪元素没法用祖先 class 选中，但自定义属性可以从 :root 继承进去 */
+:root {
+  --vt-out-duration: 340ms;
+  --vt-in-duration: 560ms;
+  /* 主题切换只用一条淡入（旧快照保持不透明），比切页短一些 */
+  --theme-vt-in: 380ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.motion-full) {
+    --vt-out-duration: 0s;
+    --vt-in-duration: 0s;
+    --theme-vt-in: 0s;
+  }
+
+  /* 粒子、渐变、光斑这类常驻装饰整层隐藏 */
+  html:not(.motion-full) .decor {
+    display: none !important;
+  }
+
+  /* 开屏是最大幅度的动效（缩放 + 模糊），直接不显示 */
+  html:not(.motion-full) .splash-root {
+    display: none !important;
+  }
+
+  /*
+   * 入场动画整个关掉。
+   * 注意不能只写 transform: none —— 动画是绑定在滚动进度上的，
+   * 只去掉位移的话元素仍会从透明淡出来。
+   */
+  html:not(.motion-full) .reveal {
+    animation: none !important;
+  }
+
+  /* 页面切换不做位移与模糊 */
+  html:not(.motion-full) .page-enter {
+    animation: none !important;
+  }
+
+  html:not(.motion-full) .splash-halo,
+  html:not(.motion-full) .sheen::before,
+  html:not(.motion-full) .btn-primary::after {
+    animation: none !important;
+  }
+}
+
+/* 用户显式选择"关闭"：全部杀掉 */
+html.motion-off {
+  --vt-out-duration: 0s;
+  --vt-in-duration: 0s;
+  --theme-vt-in: 0s;
+}
+
+.motion-off *,
+.motion-off *::before,
+.motion-off *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+.motion-off .decor,
+.motion-off .splash-root {
+  display: none !important;
+}
+
+/*
+ * 3D 音乐舞台打开时，站点背景的粒子/光斑层被整个盖住。
+ * 留着它们只是白白让 GPU 多画一层 —— 舞台上已经有一整块 WebGL 在跑了。
+ * （class 由 components/site/music-stage.tsx 挂载时写在 <html> 上。）
+ */
+.stage-open .decor {
+  display: none !important;
+}
+
+/*
+ * 滚动入场要单独关。
+ * 上面那条 animation-duration: 0.01ms 对它无效 —— 绑定在滚动时间线上的动画
+ * 不看时长，进度由元素的视口位置决定。必须整个移除动画。
+ */
+.motion-off .reveal {
+  animation: none !important;
+}
+
+/* ==================================================================
+ * keyframes
+ * ================================================================== */
+
+/*
+ * 歌词换行。「正在播放」卡片每换一句就用它淡入一次
+ * （组件靠 key={行号} 让 React 重挂载那个元素，动画就重放）。
+ *
+ * 刻意只做透明度、不做位移 —— 这样在"跟随系统"的减少动效档位下
+ * 不必再单开一条豁免规则（那条策略保留的就是颜色类过渡，见上面第 931 行）。
+ */
+@keyframes lyric-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/*
+ * 正在播放那一行前面的三根小竖条（均衡器）。
+ * 三根错开相位，看起来像在跳。只有当前曲目才显示。
+ */
+@keyframes eq-bounce {
+  0%, 100% { transform: scaleY(0.3); }
+  50%      { transform: scaleY(1); }
+}
+
+@keyframes aurora-drift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* 背景上缓慢游走的色团 —— 给玻璃提供"可折射的内容" */
+@keyframes blob-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(4vw, -5vh) scale(1.12); }
+  66%      { transform: translate(-3vw, 4vh) scale(0.94); }
+}
+
+@keyframes mote-rise {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  15%  { opacity: 0.9; }
+  85%  { opacity: 0.7; }
+  100% { transform: translateY(-105vh) scale(1.1); opacity: 0; }
+}
+
+@keyframes rain-fall {
+  0%   { transform: translate(0, -12vh); opacity: 0; }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.5; }
+  100% { transform: translate(-6vw, 108vh); opacity: 0; }
+}
+
+@keyframes firefly-drift {
+  0%, 100% { transform: translate(0, 0); }
+  33%      { transform: translate(8vw, -12vh); }
+  66%      { transform: translate(-6vw, 10vh); }
+}
+
+@keyframes firefly-breathe {
+  0%, 100% { opacity: 0; transform: scale(0.3); }
+  50%      { opacity: 1; transform: scale(1.2); }
+}
+
+@keyframes snow-drop {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translateY(105vh) rotate(360deg); opacity: 0; }
+}
+
+/* 页面入场：淡入 + 上浮 + 去模糊。三者叠加才有"对焦"的感觉 */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes splash-char {
+  from {
+    opacity: 0.12;
+    filter: blur(7px);
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+
+@keyframes splash-halo {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50%      { transform: scale(1.14); opacity: 0.9; }
+}
+
+@keyframes splash-shimmer {
+  from { transform: translateX(-120%); }
+  to   { transform: translateX(340%); }
+}
+
+@keyframes splash-exit {
+  to {
+    opacity: 0;
+    filter: blur(26px);
+    transform: scale(1.05);
+    visibility: hidden;
+  }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.animate-fade-up {
+  animation: fade-up 900ms var(--ease-smooth) both;
+}
+
+/* ==================================================================
+ * 后台的表单控件
+ *
+ * 文本框早就有一套 inputClass 了，但 <select>、复选框、单选按钮
+ * 一直是**浏览器默认样式** —— 在深色模式下尤其突兀：白底、直角、
+ * 系统描边，跟站点的玻璃质感完全不搭。
+ *
+ * 这里统一成和前台一致的语言：圆角、青玉描边、聚焦时的高亮环。
+ * 作用域是 .admin-scope（挂在后台外壳上），不碰前台任何一个控件。
+ * ================================================================== */
+
+/* ── 下拉框 ──
+   appearance: none 去掉系统外观，箭头用一张内联 SVG 画 ——
+   这样深色模式下它才会跟着文字颜色走，而不是永远一个黑三角。 */
+.admin-scope select {
+  appearance: none;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2364748b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  cursor: pointer;
+}
+
+.admin-scope select:focus-visible {
+  border-color: var(--color-jade);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-jade) 25%, transparent);
+}
+
+/* 深色模式下换一支浅色箭头 */
+.dark .admin-scope select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+}
+
+/* 下拉展开的选项列表由系统绘制，只能给它一个不透明底色 ——
+   否则深色模式下会出现"深色文字配深色背景"。 */
+.admin-scope select option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+.dark .admin-scope select option {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+
+/* ── 复选框 / 单选 ──
+   系统控件没法用 CSS 变量改配色（accent-color 在部分浏览器里
+   对深色模式处理不一致），所以整个重绘。 */
+.admin-scope input[type="checkbox"],
+.admin-scope input[type="radio"] {
+  appearance: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+  border: 1.5px solid color-mix(in oklab, var(--color-ink) 25%, transparent);
+  background-color: color-mix(in oklab, white 60%, transparent);
+  transition:
+    background-color 160ms var(--ease-smooth),
+    border-color 160ms var(--ease-smooth);
+  cursor: pointer;
+}
+
+.dark .admin-scope input[type="checkbox"],
+.dark .admin-scope input[type="radio"] {
+  border-color: color-mix(in oklab, white 22%, transparent);
+  background-color: color-mix(in oklab, white 8%, transparent);
+}
+
+.admin-scope input[type="checkbox"] {
+  border-radius: 0.3rem;
+}
+
+.admin-scope input[type="radio"] {
+  border-radius: 9999px;
+}
+
+.admin-scope input[type="checkbox"]:hover,
+.admin-scope input[type="radio"]:hover {
+  border-color: color-mix(in oklab, var(--color-jade) 60%, transparent);
+}
+
+/* 选中态：填成青玉色，勾用一张白色 SVG */
+.admin-scope input[type="checkbox"]:checked {
+  background-color: var(--color-jade);
+  border-color: var(--color-jade);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2 4.8 8.5 9.5 3.8'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.admin-scope input[type="radio"]:checked {
+  border-color: var(--color-jade);
+  /* 用 inset 阴影画圆心，比再放一个伪元素省事 */
+  box-shadow: inset 0 0 0 4px var(--color-jade);
+}
+
+.admin-scope input[type="checkbox"]:focus-visible,
+.admin-scope input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-jade) 30%, transparent);
+}
+
+/* ── 滑块 ──
+   accent-color 能用，但轨道在各浏览器里长得不一样，直接重绘。 */
+.admin-scope input[type="range"] {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.admin-scope input[type="range"]::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  border-radius: 9999px;
+  background-color: color-mix(in oklab, var(--color-ink) 12%, transparent);
+}
+
+.dark .admin-scope input[type="range"]::-webkit-slider-runnable-track {
+  background-color: color-mix(in oklab, white 14%, transparent);
+}
+
+.admin-scope input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: -0.3125rem;
+  border-radius: 9999px;
+  background-color: var(--color-jade);
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+.admin-scope input[type="range"]::-moz-range-track {
+  height: 0.375rem;
+  border-radius: 9999px;
+  background-color: color-mix(in oklab, var(--color-ink) 12%, transparent);
+}
+
+.admin-scope input[type="range"]::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background-color: var(--color-jade);
+  border: 2px solid white;
+}
+
+.admin-scope input[type="range"]:focus-visible {
+  outline: none;
+}
+
+.admin-scope input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-jade) 35%, transparent);
+}
+
+/* ── 日期 / 时间控件 ──
+   深色模式下系统会给一个几乎看不见的黑色图标，反相一下。 */
+.dark .admin-scope input[type="date"]::-webkit-calendar-picker-indicator,
+.dark .admin-scope input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.75);
+  cursor: pointer;
+}

@@ -1,0 +1,27 @@
+# 换行符统一成 LF。
+#
+# 这个项目是**在 Windows 上开发、部署到 Linux**的，
+# 两种换行符混着走很容易出怪问题：shell 脚本在服务器上报
+# `bad interpreter: /bin/sh^M`、Markdown 多余空行、diff 里整文件变色。
+#
+# 全局可能开着 core.autocrlf=true（Windows 上常见），那会让检出的文件
+# 带上 CRLF。这里的 `eol=lf` 优先级更高，会按住它 —— 工作区、仓库、
+# 服务器三边都是 LF，少了整整一类"本机好好的、服务器上炸了"。
+* text=auto eol=lf
+
+# 二进制文件不要做任何换行转换，也不要试图 diff 内容
+*.xdb   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.avif  binary
+*.ico   binary
+*.ttf   binary
+*.woff  binary
+*.woff2 binary
+*.gz    binary
+
+# 锁文件在 diff 里没有阅读价值，折叠掉
+package-lock.json  linguist-generated=true -diff

@@ -1,0 +1,16 @@
+{
+  "_说明": "复制成 deploy.config.json 后填写。那个文件已被 .gitignore 排除，不会进仓库。",
+
+  "host": "1.2.3.4",
+  "user": "root",
+  "port": 22,
+
+  "_sshKey说明": "私钥路径。Windows 上用正斜杠，例如 C:/Users/你的用户名/.ssh/id_ed25519",
+  "sshKey": "C:/Users/你的用户名/.ssh/id_ed25519",
+
+  "_remoteBase说明": "服务器上的部署根目录，和 deploy/install-server.sh 里的 BASE 保持一致",
+  "remoteBase": "/opt/myblog",
+
+  "_serviceName说明": "systemd 服务名，对应 /etc/systemd/system/<名字>.service",
+  "serviceName": "myblog"
+}

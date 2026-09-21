@@ -1,0 +1,68 @@
+# Caddy 反向代理配置。安装位置：/etc/caddy/Caddyfile
+#
+# 选 Caddy 而不是 nginx：配置文件就下面这几行，证书申请与续期全自动，
+# 不用碰 certbot、不用写 crontab、不用记一堆 proxy_set_header。
+#
+# 【A 线：域名已备案】
+#   把 example.com 换成你的域名，然后 systemctl reload caddy。
+#   Caddy 会自动向 Let's Encrypt 申请证书 —— 这需要 80 端口对外可达。
+#
+# 【B 线：未备案】
+#   不要用这个文件。让 Node 直接监听高位端口即可：
+#     1. 编辑 /etc/systemd/system/myblog.service，
+#        把 HOSTNAME 改成 0.0.0.0、PORT 改成 8080
+#     2. 在 /opt/myblog/shared/blog.env 里设 COOKIE_SECURE=false
+#     3. 阿里云安全组放行 8080，systemctl daemon-reload && systemctl restart myblog
+#   原因：阿里云大陆地域会对 80/443 上的域名做备案校验，未备案会被拦截，
+#         而且 Let's Encrypt 的 HTTP-01 验证也可能因此失败、根本签不下证书。
+
+example.com {
+	# 上传的图片由 Caddy 直接提供，不经过 Node。
+	#
+	# 为什么值得单独写一段：图片是本站流量最大的部分，让 Caddy 直接读磁盘
+	# 比走 Node 快得多，也能省下 2GB 机器上宝贵的内存。
+	# 路径是 /uploads/xxx.png，root 指向 content/，正好拼成
+	# /opt/myblog/content/uploads/xxx.png。
+	#
+	# 应用里也有一个等价的路由（app/uploads/[...path]/route.ts），
+	# 开发环境靠它，生产环境这段 Caddy 配置会先接管。
+	handle /uploads/* {
+		root * /opt/myblog/content
+		file_server
+
+		# 文件名由服务端按时间戳生成，内容永不改变 —— 可以放心长缓存
+		header Cache-Control "public, max-age=604800, immutable"
+	}
+
+	# 反代到本机的 Node 服务
+	reverse_proxy 127.0.0.1:3000 {
+		# 让应用能拿到访客真实 IP（登录限流按 IP 计数，拿不到就全算一个人头上）
+		header_up X-Real-IP {remote_host}
+	}
+
+	# 静态资源长缓存。带 hash 的文件内容变了文件名就变，可以放心长缓存。
+	@static path /_next/static/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	# 压缩
+	encode gzip zstd
+
+	# 基础安全响应头
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# 登录限速由应用自己实现（15 分钟 5 次，按 IP 计），不在这里做。
+	# 标准版 Caddy 没有 rate_limit 指令 —— 那是第三方插件 caddy-ratelimit，
+	# 写进来会导致配置加载失败。要是想在外围再加一层，用 fail2ban 更省事。
+
+	log {
+		output file /var/log/caddy/myblog.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
