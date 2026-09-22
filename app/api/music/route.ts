@@ -1,5 +1,6 @@
 import { getMusicConfig } from "@/lib/content/music";
-import { fetchNeteaseCover, fetchNeteaseSongs, outerUrl } from "@/lib/music/netease";
+import { getNeteaseCover } from "@/lib/music/cover-cache";
+import { fetchNeteaseLyric, outerUrl } from "@/lib/music/netease";
 import { extractSongId } from "@/lib/music/track-id";
 
 /**
@@ -55,29 +56,47 @@ export async function GET(request: Request) {
      *   2. 跳转等于把访客的 IP 和 Referer 交给网易的 CDN。
      *      音频那条路早就为此走了代理（见下面 proxyAsset 的说明），图片没理由例外。
      *
-     * 封面只有几十 KB 且带 10 分钟缓存，转发成本可以忽略。
+     * 封面只有几十 KB，转发成本可以忽略。
      */
     if (type === "pic") {
-      const cover = await fetchNeteaseCover(songId);
+      /*
+       * 走磁盘缓存，见 lib/music/cover-cache.ts。
+       *
+       * 这一层不只是"加速"——它是**必需**的。每个访客打开音乐页都会把
+       * 歌单里所有封面各要一遍，而封面在网易那边只能按歌曲 ID 查详情才拿得到。
+       * 不缓存的话，几个访客就能把服务器 IP 打进网易的"操作频繁"，
+       * 一被限流封面和歌词会一起挂（真发生过一次）。
+       *
+       * 缓存里存的是已经缩过的图（写入时统一加 `?param=400y400`），
+       * 所以这里直接吐字节，不再碰网易。
+       */
+      const cover = await getNeteaseCover(songId);
       if (!cover) {
         return new Response("Not found", { status: 404 });
       }
 
-      /*
-       * 让网易直接给一张缩略图。
-       *
-       * 原始封面是 940×940 的 PNG，一张就有 1 MB —— 我们转发它，
-       * 等于把服务器带宽白送给一张最大只显示到几百像素的图。
-       * 网易的图片 CDN 认 `?param=宽y高`，加上之后只有几十 KB。
-       * 万一哪天它不认这个参数，也只是退回原图，不会出错。
-       */
-      const separator = cover.includes("?") ? "&" : "?";
-      return proxyAsset(`${cover}${separator}param=300y300`, request);
+      return new Response(new Uint8Array(cover.body), {
+        headers: {
+          "Content-Type": cover.contentType,
+          /*
+           * 一天。不能沿用 proxyAsset 那个 600 秒 ——
+           * 那是给带签名的音频地址定的（签名会过期，缓存久了会拿到死链），
+           * 封面是不变的静态图，跟着一起短纯粹是白挨请求。
+           */
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
     }
 
     if (type === "lrc") {
-      const [song] = await fetchNeteaseSongs([songId]);
-      return new Response(song?.lrc ?? "", {
+      /*
+       * 只请求歌词接口，不查详情。
+       *
+       * 原来是 fetchNeteaseSongs() 走完整流程（详情 + 歌词），
+       * 于是详情一旦被限流，歌词就跟着没了 —— 明明歌词接口是好的。
+       * 要什么取什么，两个接口的故障就不会互相传染。
+       */
+      return new Response(await fetchNeteaseLyric(songId), {
         headers: { "Content-Type": "text/plain; charset=utf-8" },
       });
     }

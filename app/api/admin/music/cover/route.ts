@@ -1,5 +1,5 @@
 import { readRoute } from "@/lib/api/wrap";
-import { fetchNeteaseCover } from "@/lib/music/netease";
+import { getNeteaseCover } from "@/lib/music/cover-cache";
 import { extractSongId } from "@/lib/music/track-id";
 
 /**
@@ -8,7 +8,10 @@ import { extractSongId } from "@/lib/music/track-id";
  * 为什么不复用前台的 `/api/music?type=pic`：那条路只在**内置音源**下才走网易，
  * 自定义音源时它会把请求转发给用户配的 Meting 接口 —— 而那儿是按"歌单里的曲目"
  * 取的，搜出来、还没加进歌单的歌它不认识。后台搜索要的是"不管当前什么音源，
- * 网易云的封面都取得到"，所以单开一条，只做这一件事。
+ * 网易云的封面都取得到"，所以单开一条。
+ *
+ * 和前台共用同一份磁盘缓存（lib/music/cover-cache.ts）：搜到的歌加进歌单之后，
+ * 前台再取同一张封面就是直接命中缓存，不会再打一次网易。
  *
  * 同样只给后台用。
  */
@@ -19,20 +22,12 @@ export async function GET(request: Request) {
     );
     if (!songId) return new Response("Bad request", { status: 400 });
 
-    const cover = await fetchNeteaseCover(songId);
+    const cover = await getNeteaseCover(songId);
     if (!cover) return new Response("Not found", { status: 404 });
 
-    // 搜索列表里这图最大也就显示到 40px 上下，没必要转发原图
-    const separator = cover.includes("?") ? "&" : "?";
-    const upstream = await fetch(`${cover}${separator}param=160y160`, {
-      headers: { Referer: "https://music.163.com/" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!upstream.ok) return new Response("Not found", { status: 404 });
-
-    return new Response(upstream.body, {
+    return new Response(new Uint8Array(cover.body), {
       headers: {
-        "Content-Type": upstream.headers.get("content-type") ?? "image/jpeg",
+        "Content-Type": cover.contentType,
         // 封面基本不变，缓存久一点，省得每次搜索都重新拉一遍
         "Cache-Control": "public, max-age=86400",
       },

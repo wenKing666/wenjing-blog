@@ -117,7 +117,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
 
       const byId = new Map(data.songs.map((song) => [song.id, song]));
       let filled = 0;
-      let failed = 0;
+      const failures: string[] = [];
 
       setConfig((previous) => ({
         ...previous,
@@ -126,7 +126,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
           const song = byId.get(track.id.trim());
           if (!song) return track;
           if (song.error) {
-            failed += 1;
+            failures.push(song.error);
             return track;
           }
           filled += 1;
@@ -138,9 +138,17 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
         }),
       }));
 
+      /*
+       * 把失败原因带出来。
+       *
+       * 原来无论什么原因都写"（可能已下架）"—— 遇到网易限流时，
+       * 这句会把人往"歌没了、去删掉吧"的方向带，而实际只是服务器 IP
+       * 被"操作频繁"挡了，等一会儿自己就好。错误信息不该比实际情况更吓人。
+       */
+      const reason = failures[0];
       setFetchNote(
-        failed > 0
-          ? `已填充 ${filled} 首，${failed} 首抓不到（可能已下架）。记得点保存。`
+        failures.length > 0
+          ? `已填充 ${filled} 首，${failures.length} 首没抓到${reason ? `（${reason}）` : ""}。记得点保存。`
           : `已填充 ${filled} 首。记得点保存。`,
       );
     } catch {

@@ -44,12 +44,106 @@ export function outerUrl(id: string): string {
 }
 
 /**
+ * v3 详情接口返回的一首歌。
+ *
+ * 字段名和旧接口不一样，两套都留着：`ar`/`al` 是新版的，
+ * `artists`/`album` 是旧版的。多认几个字段的成本是零，
+ * 而网易改字段名是常事。
+ */
+type SongDetail = {
+  name?: string;
+  ar?: { name?: string }[];
+  artists?: { name?: string }[];
+  al?: { picUrl?: string };
+  album?: { picUrl?: string };
+};
+
+/**
+ * 取一首歌的详情（歌名 / 歌手 / 封面）。
+ *
+ * ★ 用的是**新版** `api/v3/song/detail`，不是老的 `api/song/detail`。
+ *
+ * 换接口这事是踩出来的：老接口对来源 IP 限流很凶，服务器 IP 实测被打成
+ *
+ *   {"msg":"操作频繁，请稍候再试","code":405}
+ *
+ * 而**新版接口同一个 IP 同一时间完全正常**（网页版自己用的就是它），
+ * 搜索、歌词两个接口也没受影响 —— 只有老详情接口被限。
+ *
+ * 新接口支持批量（body 里多塞几个 id 即可），目前一次只查一首，
+ * 需要时可以扩。
+ */
+async function fetchDetail(
+  id: string,
+): Promise<{ song: SongDetail } | { error: string }> {
+  const response = await fetch("https://music.163.com/api/v3/song/detail", {
+    method: "POST",
+    headers: {
+      ...NET_EASE_HEADERS,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: `c=${encodeURIComponent(JSON.stringify([{ id }]))}`,
+    signal: AbortSignal.timeout(6000),
+  });
+
+  if (!response.ok) {
+    return { error: `详情接口返回 ${response.status}` };
+  }
+
+  const data = (await response.json()) as {
+    songs?: SongDetail[];
+    code?: number;
+    msg?: string;
+  };
+
+  const song = data.songs?.[0];
+  if (song) return { song };
+
+  /*
+   * ★ 没有 songs 时有两种完全不同的原因，**必须分开报**。
+   *
+   * 网易限流时 HTTP 状态码依然是 **200**，只在 body 里塞一个 code:405，
+   * 对象里没有 songs。原来的代码只看 songs 在不在，于是把"操作频繁"
+   * 报成了"歌曲不存在或已下架" —— 排查时会被彻底带偏：
+   * 明明是服务器被限流，看起来却像歌被下架了，跑去后台删歌单。
+   *
+   * 这个坑实际发生过一次，封面和歌词同时挂掉，查了半天。
+   */
+  if (typeof data.code === "number" && data.code !== 200) {
+    return { error: data.msg || `网易云拒绝了这次请求（code ${data.code}）` };
+  }
+
+  return { error: "歌曲不存在或已下架" };
+}
+
+/** 取歌词。拿不到就返回空串 —— 没有歌词照样能播，不是错误。 */
+async function fetchLyric(id: string): Promise<string> {
+  try {
+    const response = await fetch(
+      `https://music.163.com/api/song/lyric?id=${id}&lv=-1&kv=-1&tv=-1`,
+      { headers: NET_EASE_HEADERS, signal: AbortSignal.timeout(6000) },
+    );
+    if (!response.ok) return "";
+
+    const data = (await response.json()) as { lrc?: { lyric?: string } };
+    return data.lrc?.lyric ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 抓取一首歌的信息。
  *
- * 详情和歌词是两个接口，并行发；歌词失败不影响主流程 ——
- * 没有歌词照样能播，没必要因为歌词挂掉就整首放弃。
+ * 详情和歌词两个接口并行发，但**各算各的**。
  *
- * `withLyric=false` 时只取详情。后台搜索结果的封面缩略图走这条路：
+ * ★ 这一点是修过的：原来详情拿不到就提前 return，顺手把已经成功取回的
+ *   歌词一起丢了。偏偏网易只限流详情接口、歌词接口是好的 ——
+ *   于是"封面挂了"连带"歌词也挂了"，一个故障表现成两个，
+ *   排查时很容易以为是两处独立的问题。
+ *   现在详情失败只影响歌名歌手封面，歌词照样返回。
+ *
+ * `withLyric=false` 时完全不请求歌词。取封面缩略图走这条路：
  * 一次搜索几十条，每条都多打一次歌词接口是白花的。
  */
 async function fetchOne(id: string, withLyric = true): Promise<NeteaseSong> {
@@ -63,54 +157,31 @@ async function fetchOne(id: string, withLyric = true): Promise<NeteaseSong> {
   };
 
   try {
-    const [detailRes, lrcRes] = await Promise.all([
-      fetch(`https://music.163.com/api/song/detail/?id=${id}&ids=[${id}]`, {
-        headers: NET_EASE_HEADERS,
-        signal: AbortSignal.timeout(6000),
-      }),
-      withLyric
-        ? fetch(`https://music.163.com/api/song/lyric?id=${id}&lv=-1&kv=-1&tv=-1`, {
-            headers: NET_EASE_HEADERS,
-            signal: AbortSignal.timeout(6000),
-          }).catch(() => null)
-        : Promise.resolve(null),
+    const [detail, lyric] = await Promise.all([
+      fetchDetail(id).catch((error: unknown) => ({
+        error: error instanceof Error ? error.message : "抓取失败",
+      })),
+      withLyric ? fetchLyric(id) : Promise.resolve(""),
     ]);
 
-    if (!detailRes.ok) {
-      return { ...fallback, error: `详情接口返回 ${detailRes.status}` };
+    // 歌词先落袋，这样详情失败也不会把它冲掉
+    const base: NeteaseSong = { ...fallback, lrc: lyric };
+
+    if ("error" in detail) {
+      return { ...base, error: detail.error };
     }
 
-    const detail = (await detailRes.json()) as {
-      songs?: {
-        name?: string;
-        artists?: { name?: string }[];
-        album?: { picUrl?: string };
-      }[];
-    };
-
-    const song = detail.songs?.[0];
-    if (!song) {
-      // 最常见的失败原因就是歌 ID 不存在，或者这首歌已下架
-      return { ...fallback, error: "歌曲不存在或已下架" };
-    }
-
-    let lrc = "";
-    if (lrcRes?.ok) {
-      try {
-        const lrcData = (await lrcRes.json()) as { lrc?: { lyric?: string } };
-        lrc = lrcData.lrc?.lyric ?? "";
-      } catch {
-        // 歌词可选，解析失败就当没有
-      }
-    }
-
+    const song = detail.song;
     return {
       id,
       name: song.name ?? "",
-      artist: song.artists?.map((a) => a.name).filter(Boolean).join(" / ") ?? "",
-      cover: song.album?.picUrl ?? "",
+      artist: (song.ar ?? song.artists ?? [])
+        .map((artist) => artist.name)
+        .filter(Boolean)
+        .join(" / "),
+      cover: song.al?.picUrl ?? song.album?.picUrl ?? "",
       url: outerUrl(id),
-      lrc,
+      lrc: lyric,
     };
   } catch (error) {
     return {
@@ -130,10 +201,15 @@ export async function fetchNeteaseSongs(ids: string[]): Promise<NeteaseSong[]> {
   return Promise.all(ids.map((id) => fetchOne(id)));
 }
 
-/** 只要封面时用它，省掉一次歌词请求。 */
+/** 只要封面地址时用它，省掉一次歌词请求。 */
 export async function fetchNeteaseCover(id: string): Promise<string> {
   const song = await fetchOne(id, false);
   return song.cover;
+}
+
+/** 只要歌词时用它，省掉一次详情请求。 */
+export async function fetchNeteaseLyric(id: string): Promise<string> {
+  return fetchLyric(id);
 }
 
 /** 一次搜索最多返回多少条。网易这个接口上限 100，30 条够挑的了。 */
