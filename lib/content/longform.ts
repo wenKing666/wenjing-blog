@@ -204,15 +204,31 @@ export function createLongformStore(collection: string, slugPrefix = "post") {
         ? input.date
         : (existing?.date ?? todayLocal());
     const content = input.content ?? "";
+    const title = input.title.trim() || slug;
+
+    /*
+     * ★ updated 要跟着**正文和标题**一起变，不能只看日期字段。
+     *
+     * 原来只在 `existing.date !== date` 时才写 todayLocal() —— 也就是
+     * 改正文永远不会更新它。后果是 sitemap 的 lastModified 永远停在
+     * 首次发布日期（搜索引擎不会因为内容更新而重爬），文章页那个
+     * "更新于"角标也永远不会出现。
+     *
+     * 两边都 trim 之后再比：readEntry 会剥掉正文开头的空行、
+     * buildFileBody 写回时又 trim 一次，直接比会因为这半行空白
+     * 每次都判定成"改过了"，updated 就变成每次保存都刷新，失去意义。
+     */
+    const changed =
+      existing != null &&
+      (existing.date !== date ||
+        existing.title.trim() !== title ||
+        existing.content.trim() !== content.trim());
 
     return {
       slug,
-      title: input.title.trim() || slug,
+      title,
       date,
-      updated:
-        existing && existing.date !== date
-          ? todayLocal()
-          : (existing?.updated ?? undefined),
+      updated: changed ? todayLocal() : (existing?.updated ?? undefined),
       summary: input.summary?.trim() ?? "",
       tags: input.tags ?? [],
       category: input.category?.trim() || undefined,

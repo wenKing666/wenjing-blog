@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentDirs } from "@/lib/content/paths";
-import { mutateRoute } from "@/lib/api/wrap";
+import { bodyToRequest, mutateRoute, readBodyWithLimit } from "@/lib/api/wrap";
 
 /**
  * 图片上传。
@@ -20,6 +20,7 @@ import { mutateRoute } from "@/lib/api/wrap";
 /** 单张上限。2GB 内存的服务器上，别让一次上传把内存吃满。 */
 const MAX_BYTES = 8 * 1024 * 1024;
 
+
 const MIME_TO_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -30,9 +31,20 @@ const MIME_TO_EXT: Record<string, string> = {
 
 export async function POST(request: Request) {
   return mutateRoute(request, async () => {
+    /*
+     * ★ 先按流读、带上限，再解析。
+     *
+     * 直接 `await request.formData()` 会把**整个 body 先读进内存**，
+     * 后面那句 `file.size > MAX_BYTES` 就形同虚设 —— 500MB 的请求
+     * 已经进来了（服务器 MemoryMax=800M，一次就够打挂进程）。
+     * readBodyWithLimit 边读边数，超了立刻掐断（见 lib/api/wrap.ts）。
+     */
+    const body = await readBodyWithLimit(request, MAX_BYTES);
+    if (!body.ok) return body.response;
+
     let form: FormData;
     try {
-      form = await request.formData();
+      form = await bodyToRequest(request, body.buffer).formData();
     } catch {
       return Response.json({ error: "请求格式不正确" }, { status: 400 });
     }

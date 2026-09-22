@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, MessageSquare, Reply, Send } from "lucide-react";
+import { formatLocalDate } from "@/lib/content/date";
 import type { CommentTarget, PublicComment } from "@/lib/content/comments";
 
 /**
@@ -27,7 +28,12 @@ function timeAgo(iso: string, now: number): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
   if (seconds < 86400 * 30) return `${Math.floor(seconds / 86400)} 天前`;
-  return iso.slice(0, 10);
+  /*
+   * 超过 30 天显示日期，必须按本地时间算 —— createdAt 是 UTC，
+   * 东八区 00:00–08:00 发的评论直接切字符串会显示成前一天。
+   * 这里在 rAF 回调里调用，只在客户端跑，不涉及 SSR。
+   */
+  return formatLocalDate(iso);
 }
 
 function CommentTime({ iso }: { iso: string }) {

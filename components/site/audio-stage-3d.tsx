@@ -98,12 +98,30 @@ export default function AudioStage3D({
   const playingRef = useRef(playing);
   const accentRef = useRef(accent);
   const onReadyRef = useRef(onReady);
+  const motionRef = useRef(motionOn);
+
+  /*
+   * ★ 动效开关的"启停把手"。
+   *
+   * 建场景那个 effect 依赖数组是空的，**不再因为 motionOn 变化而重建** ——
+   * 重建的代价是一整块 WebGL 上下文，而且中间还要 forceContextLoss()。
+   *
+   * 原来的写法是 effect 依赖 [motionOn]，而 useMotionAllowed 的初值是 true、
+   * 真实值要等 effect 才知道，于是开了「减少动效」的访客每次进 /music 都会：
+   *   建第一个上下文 → 起 rAF → 被翻成 false → dispose + 丢上下文 → 再建第二个
+   * 反复进出很容易撞上浏览器的 WebGL 上下文配额（通常只有十几个），
+   * 表现就是"场景整个变黑"。
+   *
+   * 现在建场景时把启停函数挂在这里，另一个只依赖 motionOn 的 effect 去调它。
+   */
+  const loopControlRef = useRef<((on: boolean) => void) | null>(null);
 
   useEffect(() => {
     playingRef.current = playing;
     accentRef.current = accent;
     onReadyRef.current = onReady;
-  }, [playing, accent, onReady]);
+    motionRef.current = motionOn;
+  }, [playing, accent, onReady, motionOn]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -750,30 +768,43 @@ export default function AudioStage3D({
       announce();
     };
 
-    if (motionOn) {
+    /* ── 循环的启停。建场景时不自动开跑，交给下面那个 effect ── */
+    const startLoop = () => {
+      if (frame) return;
+      last = performance.now();
       frame = requestAnimationFrame(tick);
-    } else {
-      renderStill();
-    }
+    };
+    const stopLoop = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    };
+    /** 关掉动效时只渲染一帧静态画面，别让画布空着 */
+    const applyMotion = (on: boolean) => {
+      if (on) startLoop();
+      else {
+        stopLoop();
+        renderStill();
+      }
+    };
+    loopControlRef.current = applyMotion;
 
     /*
      * 标签页切到后台就停掉循环 —— 看不见的画面没必要占着 GPU。
      * 回来时重置 last，不会因为停了很久而跳帧。
      */
     const onVisibility = () => {
-      if (!motionOn) return;
+      if (!motionRef.current) return;
       if (document.hidden) {
-        if (frame) cancelAnimationFrame(frame);
-        frame = 0;
-      } else if (!frame) {
-        last = performance.now();
-        frame = requestAnimationFrame(tick);
+        stopLoop();
+      } else {
+        startLoop();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      if (frame) cancelAnimationFrame(frame);
+      loopControlRef.current = null;
+      stopLoop();
       document.removeEventListener("visibilitychange", onVisibility);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerup", onPointerUp);
@@ -792,7 +823,27 @@ export default function AudioStage3D({
       renderer.forceContextLoss();
       renderer.domElement.remove();
     };
+
+    /*
+     * ★ 依赖数组是**空的** —— 场景只建一次，到卸载才拆。
+     *
+     * playing / accent / onReady / motionOn 全都走上面的 ref。
+     * 它们任何一个进了依赖数组，都会导致整块 WebGL 上下文被重建，
+     * 而上下文配额只有十几个 —— 切几首歌就没了。
+     */
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /*
+   * 动效开关单独管：只调启停函数，不碰场景。
+   *
+   * 这个 effect 声明在建场景那个**之后**，所以挂载时的顺序是：
+   * 先建好场景（此时循环还没跑）→ 这里再按真实值启动或画静态帧。
+   * 于是 useMotionAllowed 那个"初值 true、随后翻 false"的抖动
+   * 不会再触发一次重建。
+   */
+  useEffect(() => {
+    loopControlRef.current?.(motionOn);
   }, [motionOn]);
 
   return <div ref={hostRef} className="absolute inset-0" aria-hidden="true" />;

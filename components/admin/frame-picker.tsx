@@ -268,8 +268,18 @@ export function FramePicker({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id, dataUrl }),
           });
-          const data = (await response.json()) as { frames?: AvatarFrame[] };
-          if (data.frames && !cancelled) setFrames(data.frames);
+          /*
+           * 接口现在只回被改的那一条（见 app/api/admin/frames/thumb/route.ts）。
+           * 原来整份替换：一页 48 张就是 48 次 200KB 的传输 + 48 次全量重渲染。
+           * 只替换命中的那条，其余原样保留。
+           */
+          const data = (await response.json()) as { frame?: AvatarFrame };
+          const updated = data.frame;
+          if (updated && !cancelled) {
+            setFrames((previous) =>
+              previous.map((item) => (item.id === updated.id ? updated : item)),
+            );
+          }
         } catch {
           // 生成失败无所谓：那个框继续用动图本体，只是没那么流畅
         }

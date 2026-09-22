@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Check, ExternalLink, Loader2, Trash2, X } from "lucide-react";
 import { MessageBar, type SaveMessage } from "./ui";
+import { formatLocalDateTime } from "@/lib/content/date";
 import type { Comment, CommentTarget } from "@/lib/content/comments";
 
 type Row = Comment & { target: CommentTarget; slug: string };
@@ -158,8 +159,17 @@ export function CommentModeration({
                   <span className="font-semibold text-ink dark:text-white">
                     {row.author}
                   </span>
-                  <span className="tnum font-mono text-xs text-ink-faint dark:text-slate-500">
-                    {row.createdAt.slice(0, 16).replace("T", " ")}
+                  {/*
+                    按本地时间显示。createdAt 存的是 UTC，直接 slice 出来
+                    会比北京时间早 8 小时（见 lib/content/date.ts 的说明）。
+                    suppressHydrationWarning：这个字符串取决于时区，
+                    服务器和访客不在同一时区时首帧会不一致。
+                  */}
+                  <span
+                    suppressHydrationWarning
+                    className="tnum font-mono text-xs text-ink-faint dark:text-slate-500"
+                  >
+                    {formatLocalDateTime(row.createdAt)}
                   </span>
                   {!row.approved && (
                     <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-sans text-[0.625rem] font-semibold text-amber-600 dark:text-amber-400">

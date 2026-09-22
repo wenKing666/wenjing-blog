@@ -97,7 +97,27 @@ export async function GET(request: Request) {
     );
   }
 
-  const target = new URL(config.apiUrl);
+  /*
+   * 这里必须兜住 new URL 抛错。
+   *
+   * saveMusicConfig 现在已经会规整地址了，但**老配置里可能还留着**
+   * 不带协议的值（比如 `example.com/api`）—— 那种情况下每次请求都会
+   * 抛 ERR_INVALID_URL，整个 /api/music 500，播放器一句话都不说。
+   * 给一条能看懂的报错，比 500 有用得多。
+   */
+  let target: URL;
+  try {
+    target = new URL(config.apiUrl);
+  } catch {
+    return Response.json(
+      {
+        error:
+          "音源接口地址不合法（需要带 http:// 或 https://），请到后台「音乐」里改一下",
+      },
+      { status: 503 },
+    );
+  }
+
   target.searchParams.set("server", server);
   target.searchParams.set("type", type);
   target.searchParams.set("id", songId);

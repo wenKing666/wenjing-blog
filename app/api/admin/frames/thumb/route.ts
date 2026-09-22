@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { contentDirs } from "@/lib/content/paths";
 import { setFrameThumb } from "@/lib/content/frames";
-import { mutateRoute, parseJsonBody } from "@/lib/api/wrap";
+import { bodyToRequest, mutateRoute, readBodyWithLimit } from "@/lib/api/wrap";
 
 /**
  * 保存某个头像框的静态缩略图。
@@ -25,7 +25,22 @@ const ALLOWED = new Map([
 
 export async function POST(request: Request) {
   return mutateRoute(request, async () => {
-    const body = await parseJsonBody<{ id?: unknown; dataUrl?: unknown }>(request);
+    /*
+     * 和上传接口同样的道理：JSON body 里那个 base64 上限是 512KB，
+     * 但 `request.json()` 会把**整个 body 先读进内存**，后面再判大小就晚了
+     * （见 lib/api/wrap.ts 的 readBodyWithLimit）。
+     * base64 会膨胀约 4/3，所以上限按 512KB 给，留的富余足够。
+     */
+    const raw = await readBodyWithLimit(request, MAX_BYTES);
+    if (!raw.ok) return raw.response;
+
+    let body: { id?: unknown; dataUrl?: unknown };
+    try {
+      body =
+        (await bodyToRequest(request, raw.buffer).json()) as typeof body;
+    } catch {
+      return Response.json({ error: "请求格式不正确" }, { status: 400 });
+    }
 
     const id = typeof body.id === "string" ? body.id : "";
     const dataUrl = typeof body.dataUrl === "string" ? body.dataUrl : "";
@@ -67,6 +82,17 @@ export async function POST(request: Request) {
     await fs.writeFile(path.join(contentDirs.uploads, filename), buffer);
 
     const frames = await setFrameThumb(id, `/uploads/${filename}`);
-    return Response.json({ frames });
+
+    /*
+     * ★ 只回**被改的这一条**，不要回整份清单。
+     *
+     * 这个接口是「浏览到哪一页就补哪一页」按需调用的，一页 48 个框就是
+     * 48 次请求。而清单有 2000 多条、序列化出来约 200KB ——
+     * 整份回传的话一页要传约 10MB，客户端还要做 48 次全量数组替换和重渲染。
+     *
+     * 调用方本来就只关心"我刚存的那张的 thumb 变成了什么"。
+     */
+    const updated = frames.find((frame) => frame.id === id) ?? null;
+    return Response.json({ frame: updated });
   });
 }

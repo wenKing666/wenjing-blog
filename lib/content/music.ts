@@ -61,6 +61,39 @@ export const DEFAULT_MUSIC: MusicConfig = {
   tracks: [],
 };
 
+/**
+ * 规整自定义解析接口地址。
+ *
+ * **必须做这件事**：后台那个输入框是个纯文本框，而人填接口地址时
+ * 十有八九只写 `example.com/api`，不会带协议。这个值后面会被
+ * `new URL()` 直接吃掉 —— 不带协议就抛 ERR_INVALID_URL，
+ * 结果是**每一首歌的请求都 500**，播放器完全没反应。
+ *
+ * 而且 `isMusicPlayable` 原来只看 `Boolean(apiUrl)`，填了个非法地址
+ * 它照样返回 true —— 前台照常渲染播放器，用户点了没声音、也没有任何提示，
+ * 只会以为网站坏了。
+ *
+ * 拿不到合法地址就返回空串，让"没配接口"这条既有逻辑接管。
+ */
+export function normalizeApiUrl(raw: string | undefined): string {
+  const trimmed = (raw ?? "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+
+  // 带 "://" 但不是 http/https —— 协议拼错了，当作没填
+  if (/:\/\//.test(trimmed) && !/^https?:\/\//i.test(trimmed)) return "";
+
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    const parsed = new URL(candidate);
+    if (!parsed.hostname) return "";
+    if (/\s/.test(parsed.hostname)) return "";
+    return candidate;
+  } catch {
+    return "";
+  }
+}
+
 export async function getMusicConfig(): Promise<MusicConfig> {
   const config = await readJson<MusicConfig>(contentDirs.music, DEFAULT_MUSIC);
   return {
@@ -84,7 +117,8 @@ export async function saveMusicConfig(
 ): Promise<MusicConfig> {
   const cleaned: MusicConfig = {
     source: config.source === "custom" ? "custom" : "builtin",
-    apiUrl: config.apiUrl.trim().replace(/\/+$/, ""),
+    // 顺手补协议 + 校验，别把非法地址存进去（原因见 normalizeApiUrl 的注释）
+    apiUrl: normalizeApiUrl(config.apiUrl),
     title: config.title.trim() || DEFAULT_MUSIC.title,
     // 既没有平台 ID 又没有直链的条目留着也没用
     tracks: config.tracks.filter(
@@ -105,5 +139,13 @@ export function isMusicPlayable(config: MusicConfig): boolean {
   if (config.source === "builtin") {
     return config.tracks.some((t) => t.id || t.directUrl);
   }
-  return Boolean(config.apiUrl) || config.tracks.some((t) => t.directUrl);
+  /*
+   * 自定义模式必须校验地址本身合不合法。
+   * 原来只看 `Boolean(apiUrl)` —— 填了 `example.com/api`（不带协议）
+   * 也算"能播"，前台照常渲染播放器，用户点下去只会得到一片 500。
+   */
+  return (
+    normalizeApiUrl(config.apiUrl) !== "" ||
+    config.tracks.some((t) => t.directUrl)
+  );
 }
