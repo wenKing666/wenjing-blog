@@ -2,7 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Loader2, Plus, Trash2, Wand2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Loader2,
+  Plus,
+  Search,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 import {
   inputClass,
   labelClass,
@@ -13,6 +21,13 @@ import {
   type SaveMessage,
 } from "./ui";
 import type { MusicConfig, Track } from "@/lib/content/music";
+import { formatTime } from "@/lib/format-time";
+/*
+ * 只引类型。`import type` 会在编译期被完全抹掉，不会把 netease.ts 里的
+ * 请求逻辑打进浏览器包 —— 那个文件是服务端专用的（同样的原因，
+ * track-id.ts 才被单独拆了出去）。
+ */
+import type { NeteaseSearchHit } from "@/lib/music/netease";
 
 /** 解析接口通常支持这些平台，写成下拉省得用户手打错。 */
 const SERVERS = [
@@ -23,6 +38,35 @@ const SERVERS = [
   { value: "baidu", label: "百度音乐" },
 ];
 
+/**
+ * 付费类型的角标。
+ *
+ * `fee` 是网易的原始字段，取值含义记在 lib/music/netease.ts。
+ * 标出来的目的只有一个：让人**加之前**就知道哪些加了也播不了 ——
+ * 内置音源走的是网易对免费歌曲开放的外链，VIP 和付费专辑会返回空文件。
+ */
+function feeBadge(fee: number): { text: string; className: string } | null {
+  if (fee === 1) {
+    return {
+      text: "VIP",
+      className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    };
+  }
+  if (fee === 4) {
+    return {
+      text: "付费专辑",
+      className: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+    };
+  }
+  if (fee === 8) {
+    return {
+      text: "低音质",
+      className: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
+    };
+  }
+  return null;
+}
+
 export function MusicEditor({ initial }: { initial: MusicConfig }) {
   const router = useRouter();
   const [config, setConfig] = useState<MusicConfig>(initial);
@@ -32,6 +76,14 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
 
   const [fetchingInfo, setFetchingInfo] = useState(false);
   const [fetchNote, setFetchNote] = useState<string | null>(null);
+
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  /** null = 还没搜过，结果区不渲染 */
+  const [results, setResults] = useState<NeteaseSearchHit[] | null>(null);
+  /** 搜出当前这批结果时用的关键词，只用于"没搜到 xxx"那句提示 */
+  const [searchedFor, setSearchedFor] = useState("");
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const dirty = JSON.stringify(config) !== snapshot;
 
@@ -96,6 +148,66 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
     } finally {
       setFetchingInfo(false);
     }
+  }
+
+  /** 搜歌。浏览器只跟自己的后台说话，由服务端去问网易云。 */
+  async function runSearch() {
+    const keyword = query.trim();
+    if (!keyword || searching) return;
+
+    setSearching(true);
+    setSearchError(null);
+
+    try {
+      const response = await fetch(
+        `/api/admin/music/search?q=${encodeURIComponent(keyword)}`,
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        songs?: NeteaseSearchHit[];
+        error?: string;
+      };
+
+      if (!response.ok || !data.songs) {
+        setSearchError(data.error ?? `搜索失败（HTTP ${response.status}）`);
+        setResults(null);
+        return;
+      }
+
+      setResults(data.songs);
+      setSearchedFor(keyword);
+    } catch {
+      setSearchError("无法连接服务器。");
+      setResults(null);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  /**
+   * 把搜索结果加进歌单。
+   *
+   * 歌名歌手在这儿就填上了 —— 搜索结果本来就有，没必要加完再点一次
+   * 「抓取歌曲信息」。封面和歌词仍由前台的 /api/music 按歌曲 ID 取，
+   * 不存进配置文件。
+   */
+  function addHit(hit: NeteaseSearchHit) {
+    setConfig((previous) =>
+      previous.tracks.some((track) => track.id.trim() === hit.id)
+        ? previous
+        : {
+            ...previous,
+            tracks: [
+              ...previous.tracks,
+              {
+                id: hit.id,
+                server: "netease",
+                name: hit.name,
+                artist: hit.artist,
+                directUrl: "",
+              },
+            ],
+          },
+    );
   }
 
   function updateTrack(index: number, patch: Partial<Track>) {
@@ -247,6 +359,129 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
           无论是哪种方式，把音频放进
           <code className="mx-1 font-mono">content/uploads/</code>
           再在曲目里填「直链」，都能绕开所有外部依赖 —— 也最稳。
+        </p>
+      </Section>
+
+      <Section
+        title="从网易云搜索"
+        description="搜到点一下就能加进歌单，歌名和歌手自动填好 —— 不用再去网易云网页复制歌曲 ID。"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runSearch();
+          }}
+          className="flex flex-wrap items-end gap-2"
+        >
+          <div className="min-w-[12rem] flex-1">
+            <label htmlFor="musicQuery" className={labelClass}>
+              关键词
+            </label>
+            <input
+              id="musicQuery"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="歌名、歌手、专辑都行"
+              className={inputClass}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={searching || !query.trim()}
+            className="inline-flex items-center gap-2 rounded-tile border border-ink/12 px-4 py-2 font-sans text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 disabled:opacity-50 dark:border-white/12 dark:text-slate-300 dark:hover:bg-white/5"
+          >
+            {searching ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Search className="h-4 w-4" aria-hidden="true" />
+            )}
+            搜索
+          </button>
+        </form>
+
+        {searchError && (
+          <p className="font-sans text-xs text-red-600 dark:text-red-400">
+            {searchError}
+          </p>
+        )}
+
+        {results !== null && results.length === 0 && (
+          <p className={hintClass}>没搜到「{searchedFor}」，换个关键词试试。</p>
+        )}
+
+        {results !== null && results.length > 0 && (
+          <ul className="divide-y divide-ink/8 dark:divide-white/8">
+            {results.map((hit) => {
+              const added = config.tracks.some(
+                (track) => track.id.trim() === hit.id,
+              );
+              const badge = feeBadge(hit.fee);
+
+              return (
+                <li key={hit.id} className="flex items-center gap-3 py-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- 后台缩略图，无需图片优化器 */}
+                  <img
+                    src={hit.cover}
+                    alt=""
+                    width={40}
+                    height={40}
+                    loading="lazy"
+                    className="h-10 w-10 shrink-0 rounded-tile bg-ink/5 object-cover dark:bg-white/5"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-sans text-sm font-semibold">
+                      {hit.name || "（无标题）"}
+                    </p>
+                    <p className="truncate font-sans text-xs text-ink-faint dark:text-slate-500">
+                      {[hit.artist, hit.album].filter(Boolean).join(" · ") ||
+                        "未知歌手"}
+                    </p>
+                  </div>
+
+                  {badge && (
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 font-sans text-xs font-semibold ${badge.className}`}
+                    >
+                      {badge.text}
+                    </span>
+                  )}
+
+                  {hit.duration > 0 && (
+                    <span className="shrink-0 font-mono text-xs text-ink-faint dark:text-slate-500">
+                      {formatTime(hit.duration / 1000)}
+                    </span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => addHit(hit)}
+                    disabled={added}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-tile border border-jade/30 bg-jade/10 px-3 py-1.5 font-sans text-xs font-semibold text-jade transition-colors hover:bg-jade/20 disabled:border-ink/10 disabled:bg-transparent disabled:text-ink-faint dark:text-jade-pale dark:disabled:text-slate-500"
+                  >
+                    {added ? (
+                      "已在歌单"
+                    ) : (
+                      <>
+                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                        加入
+                      </>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <p className={hintClass}>
+          带 <span className="font-semibold">VIP</span> /{" "}
+          <span className="font-semibold">付费专辑</span>{" "}
+          角标的歌，加进去也播不了 —— 内置音源走的是网易对免费歌曲开放的外链，
+          这一点不会因为换了添加方式而改变。<span className="font-semibold">
+            低音质
+          </span>{" "}
+          的能播，但只有 128kbps。
         </p>
       </Section>
 

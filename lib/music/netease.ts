@@ -48,8 +48,11 @@ export function outerUrl(id: string): string {
  *
  * 详情和歌词是两个接口，并行发；歌词失败不影响主流程 ——
  * 没有歌词照样能播，没必要因为歌词挂掉就整首放弃。
+ *
+ * `withLyric=false` 时只取详情。后台搜索结果的封面缩略图走这条路：
+ * 一次搜索几十条，每条都多打一次歌词接口是白花的。
  */
-async function fetchOne(id: string): Promise<NeteaseSong> {
+async function fetchOne(id: string, withLyric = true): Promise<NeteaseSong> {
   const fallback: NeteaseSong = {
     id,
     name: "",
@@ -65,10 +68,12 @@ async function fetchOne(id: string): Promise<NeteaseSong> {
         headers: NET_EASE_HEADERS,
         signal: AbortSignal.timeout(6000),
       }),
-      fetch(`https://music.163.com/api/song/lyric?id=${id}&lv=-1&kv=-1&tv=-1`, {
-        headers: NET_EASE_HEADERS,
-        signal: AbortSignal.timeout(6000),
-      }).catch(() => null),
+      withLyric
+        ? fetch(`https://music.163.com/api/song/lyric?id=${id}&lv=-1&kv=-1&tv=-1`, {
+            headers: NET_EASE_HEADERS,
+            signal: AbortSignal.timeout(6000),
+          }).catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     if (!detailRes.ok) {
@@ -122,11 +127,116 @@ async function fetchOne(id: string): Promise<NeteaseSong> {
  * 不该让整个歌单都空掉。
  */
 export async function fetchNeteaseSongs(ids: string[]): Promise<NeteaseSong[]> {
-  return Promise.all(ids.map(fetchOne));
+  return Promise.all(ids.map((id) => fetchOne(id)));
 }
 
 /** 只要封面时用它，省掉一次歌词请求。 */
 export async function fetchNeteaseCover(id: string): Promise<string> {
-  const song = await fetchOne(id);
+  const song = await fetchOne(id, false);
   return song.cover;
+}
+
+/** 一次搜索最多返回多少条。网易这个接口上限 100，30 条够挑的了。 */
+const MAX_SEARCH_LIMIT = 30;
+
+/** 搜索结果里的一首歌。字段是按"够用来挑歌"选的，不是照搬接口返回。 */
+export type NeteaseSearchHit = {
+  id: string;
+  name: string;
+  artist: string;
+  album: string;
+  /** 时长，毫秒。0 表示接口没给 */
+  duration: number;
+  /**
+   * 付费类型，网易的原始字段：
+   *
+   *   0  免费
+   *   1  VIP 歌曲
+   *   4  付费专辑（要买整张）
+   *   8  低音质免费（能放，但只有 128kbps）
+   *
+   * 后台拿它标出"加了也播不了"的歌 —— 内置音源走的是网易的免费外链，
+   * VIP 和付费专辑会返回空文件。让人**加之前**就知道，
+   * 比加完发现点了没声音强。
+   */
+  fee: number;
+  /** 封面，指向后台自己的代理（见 /api/admin/music/cover） */
+  cover: string;
+};
+
+/**
+ * 搜歌。
+ *
+ * 用的是网易云网页版自己那个 `search/get/web` 接口 —— 它**不需要登录，
+ * 也不需要加密**（新版 `/api/search` 要 weapi 加密，这个不用），
+ * 所以内置音源这套零依赖的取数方式能直接复用，不必额外部署解析服务。
+ *
+ * 关键词原样交给网易，不做本地过滤：中文、日文、英文它自己处理得比我们好。
+ */
+export async function searchNetease(
+  keyword: string,
+  limit: number = MAX_SEARCH_LIMIT,
+): Promise<NeteaseSearchHit[]> {
+  const trimmed = keyword.trim();
+  if (!trimmed) return [];
+
+  const count = Math.min(Math.max(1, Math.trunc(limit)), MAX_SEARCH_LIMIT);
+  const url = new URL("https://music.163.com/api/search/get/web");
+  url.searchParams.set("s", trimmed);
+  // 1 = 单曲。不加 type 会连专辑、歌单一起搜出来，那些没有歌曲 ID
+  url.searchParams.set("type", "1");
+  url.searchParams.set("limit", String(count));
+  url.searchParams.set("offset", "0");
+
+  const response = await fetch(url, {
+    headers: NET_EASE_HEADERS,
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`搜索接口返回 ${response.status}`);
+
+  const data = (await response.json()) as {
+    result?: {
+      songs?: {
+        id?: number;
+        name?: string;
+        duration?: number;
+        fee?: number;
+        artists?: { name?: string }[];
+        album?: { name?: string };
+      }[];
+    };
+  };
+
+  /*
+   * 搜不到时 `result` 整个不存在，不是空数组 —— 所以两级都要 `?.`。
+   * 搜不到是常态（关键词打错、歌没上架），返回空列表而不是抛错。
+   */
+  return (data.result?.songs ?? []).flatMap((song) => {
+    const id = typeof song.id === "number" && song.id > 0 ? String(song.id) : "";
+    if (!id) return [];
+
+    return [
+      {
+        id,
+        name: (song.name ?? "").trim(),
+        // 多歌手用 " / " 连起来，和 fetchOne 里的写法保持一致
+        artist: (song.artists ?? [])
+          .map((artist) => artist.name)
+          .filter(Boolean)
+          .join(" / "),
+        album: (song.album?.name ?? "").trim(),
+        duration: Number(song.duration) > 0 ? Number(song.duration) : 0,
+        fee: Number(song.fee) > 0 ? Number(song.fee) : 0,
+        /*
+         * 封面走后台自己的代理，不把网易图床的直链交给浏览器。
+         *
+         * 之所以要绕一次：搜索结果里只有 `album.picId`，而它是个
+         * **超过 2^53 的整数**（比如 109951163038292176），JSON.parse
+         * 会把它抹成附近的另一个数 —— 拿它拼出来的图床地址是坏的。
+         * 按歌曲 ID 去取就没这个问题，接口返回的是真正的 picUrl。
+         */
+        cover: `/api/admin/music/cover?id=${id}`,
+      },
+    ];
+  });
 }
