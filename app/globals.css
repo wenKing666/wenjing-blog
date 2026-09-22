@@ -1132,6 +1132,22 @@ html.motion-off {
 }
 
 /*
+ * 后台曲目行的展开。
+ *
+ * 和上面 lyric-in 同样是**只做透明度、不做位移**，所以"跟随系统"的
+ * 减少动效档位下不必再单开豁免规则 —— 那条策略保留的正是颜色/透明度类过渡
+ * （要关位移类动画得显式写，见 1063 行附近那几条）。
+ * "关闭动效"档位由 .motion-off * 的 animation-duration: 0.01ms 兜住。
+ */
+@keyframes row-open {
+  from { opacity: 0; }
+}
+
+.row-open {
+  animation: row-open 200ms var(--ease-smooth);
+}
+
+/*
  * 正在播放那一行前面的三根小竖条（均衡器）。
  * 三根错开相位，看起来像在跳。只有当前曲目才显示。
  */

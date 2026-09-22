@@ -122,6 +122,55 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
   const positionedRef = useRef(false);
 
   /*
+   * ── 歌单的缓动滚动 ──
+   *
+   * 为什么**不**照抄歌词栏那套 transform 位移：
+   *
+   * 歌词是只由程序驱动的，用户从不手动滚它，所以把原生滚动整个换掉没有代价。
+   * 歌单不一样 —— 窄屏下它是手指滚的浮层，还牵扯键盘翻页、读屏的"滚动到可见"。
+   * 换成 overflow:hidden + transform 会把这些一并废掉。
+   *
+   * 所以这里**保留原生滚动容器**，只接管滚轮（触屏没有滚轮，正好互不打扰）。
+   *
+   * 那歌词那段注释里"别用 scrollTop + scroll-behavior: smooth"的结论呢？
+   * 它反对的是 CSS 那个 smooth **属性**（时长不可控、会被新滚动打断），
+   * 不是反对碰 scrollTop 本身。自己用 rAF 缓动恰好绕开这两点：缓动曲线自己定，
+   * 而且下面是"目标值 + 指数趋近"，连着滚只是把目标往前推，没有接缝。
+   *
+   * 代价也写明白：transform 走合成器，scrollTop 不走 —— 赋值会触发滚动重绘，
+   * 而这一栏在 lg 上有 rotateY(-18deg)，可能连带重新栅格化那一层。
+   * 十几行文字的列表量不出差别，而换成 transform 要拿触屏去换，不划算。
+   */
+  const listRef = useRef<HTMLOListElement | null>(null);
+  const activeTrackRef = useRef<HTMLLIElement | null>(null);
+  const fadeTopRef = useRef<HTMLSpanElement | null>(null);
+  const fadeBottomRef = useRef<HTMLSpanElement | null>(null);
+
+  /**
+   * 用户最后一次自己动列表的时刻。
+   *
+   * 初值给 -Infinity 而不是 0：给 0 的话，页面刚加载时 performance.now() 还不到
+   * 1.2 秒，进 /music 那一次居中会被自己的"别跟用户抢"规则挡掉。
+   */
+  const userScrolledAtRef = useRef(-Infinity);
+  /** 这次换歌是用户点出来的（点出来的一定居中，不等那 1.2 秒） */
+  const pickedRef = useRef(false);
+
+  /*
+   * 滚动控制的"把手"，和 audio-stage-3d.tsx 的 loopControlRef 同源：
+   * 建循环的 effect 依赖数组是空的，别的 effect 只管往这儿写目标，
+   * 不因为 motionOn 之类的东西反复拆装。
+   *
+   * 滚轮和"跟随当前曲目"都要写同一个 scrollTop，各起一套 rAF 必然互相打架
+   * （一个还在跑、另一个把目标改了，观感就是抖），所以只留一个循环。
+   */
+  const scrollControlRef = useRef<{
+    nudge: (deltaPx: number) => void;
+    glideTo: (top: number, instant: boolean) => void;
+    halt: () => void;
+  } | null>(null);
+
+  /*
    * 顶部导航胶囊会自己藏起来，鼠标移到顶部再出现。
    *
    * 这是"沉浸式播放器"的惯用手法：三秒不动就把导航收掉，
@@ -230,6 +279,276 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
       });
     }
   }, [lineIndex, motionOn, lines]);
+
+  /* ── 滚动控制器：空依赖，只建一次 ── */
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    let target = list.scrollTop;
+    /**
+     * 当前位置，**用局部浮点数自己记账**。
+     *
+     * ★ 不能写 `list.scrollTop += 步长`：scrollTop 会被浏览器对齐到设备像素，
+     *   读回来的是舍入过的值。尾部每帧只走零点几像素时，"读 → 加 → 写"
+     *   每次都把那点增量舍掉，位置就永远停在原地（实测卡在离目标 18px 处），
+     *   而循环还在空转 —— 既到不了位，又白烧 CPU。真踩过。
+     */
+    let current = list.scrollTop;
+    let frame: number | null = null;
+    let last = 0;
+    /** 指数衰减的时间常数（毫秒）：越小越跟手。滚轮给小值，自动跟随给大值 */
+    let tau = 120;
+
+    const clamp = (value: number) =>
+      Math.max(0, Math.min(value, list.scrollHeight - list.clientHeight));
+
+    const step = (now: number) => {
+      frame = null;
+      // 切到后台再回来时 now - last 可能是好几秒，掐住，免得一步跳过去
+      const dt = Math.min(48, now - last);
+      last = now;
+
+      const distance = target - current;
+      if (Math.abs(distance) < 0.5) {
+        current = target;
+        list.scrollTop = current;
+        return;
+      }
+
+      /*
+       * 指数趋近：每帧吃掉剩余距离的固定比例，比例按真实 dt 折算，
+       * 所以 60Hz 和 120Hz 的手感一致。
+       *
+       * 刻意用"趋近"而不是"固定时长的补间"：它天生可打断 ——
+       * 滚轮连着来时只是把 target 往前推，不存在"上一段没跑完就被掐掉"的接缝，
+       * 而那正是原生平滑滚动被诟病的地方（见上面歌词那段注释）。
+       */
+      current += distance * (1 - Math.exp(-dt / tau));
+      list.scrollTop = current;
+      frame = requestAnimationFrame(step);
+    };
+
+    const kick = () => {
+      if (frame !== null) return;
+      last = performance.now();
+      frame = requestAnimationFrame(step);
+    };
+
+    scrollControlRef.current = {
+      nudge: (delta) => {
+        // 从 target 而不是 scrollTop 起算：连续滚动时不会把还没跑完的那段距离吃掉
+        target = clamp(target + delta);
+        tau = 120;
+        kick();
+      },
+      glideTo: (top, instant) => {
+        target = clamp(top);
+        if (instant) {
+          if (frame !== null) {
+            cancelAnimationFrame(frame);
+            frame = null;
+          }
+          current = target;
+          list.scrollTop = current;
+          return;
+        }
+        tau = 260;
+        kick();
+      },
+      halt: () => {
+        if (frame !== null) {
+          cancelAnimationFrame(frame);
+          frame = null;
+        }
+        // 交还给原生滚动：局部记账要跟真实的 scrollTop 对齐，否则下一帧会跳回去
+        current = list.scrollTop;
+        target = current;
+      },
+    };
+
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      scrollControlRef.current = null;
+    };
+    /*
+     * ★ isClient 必须留在依赖数组里，别当成多余依赖删掉。
+     *
+     * 这个组件在服务端和**客户端首帧**都走 `if (!isClient) return null` ——
+     * 也就是说挂载那一刻 JSX 根本不存在，所有 ref 都是 null。
+     * 等 useIsClient 翻成 true、节点真正挂上、ref 绑好之后，
+     * 如果依赖数组没变，effect 就**不会重跑**：每个 effect 都只在
+     * "ref 还是 null"的那一次里跑过、然后早退，再没有第二次机会。
+     *
+     * 症状极具迷惑性：DOM 里元素都在、类名都是新的、控制台一条报错都没有，
+     * 就是什么效果都不生效。我在这上面栽过，五个 effect 全中同一个坑。
+     */
+  }, [isClient]);
+
+  /* ── 滚轮：缓动接管 ── */
+  useEffect(() => {
+    const list = listRef.current;
+    /*
+     * 减少动效时连监听都不挂：这时滚轮交还给浏览器（原生滚动本来就是瞬时的）。
+     * rAF 是 JS 动效，.motion-off 那条 CSS 规则管不到它，必须在这里自己判。
+     */
+    if (!list || !motionOn) return;
+
+    /** Firefox 的 deltaMode=1 报的是"行数"，得折算成像素 */
+    const LINE_PX = 40;
+
+    const onWheel = (event: WheelEvent) => {
+      /*
+       * 触控板双指捏合也会发 wheel（带 ctrlKey），那是页面缩放 ——
+       * 拦掉等于把浏览器缩放废了，直接放行。
+       */
+      if (event.ctrlKey) return;
+
+      const scale =
+        event.deltaMode === 1
+          ? LINE_PX
+          : event.deltaMode === 2
+            ? list.clientHeight
+            : 1;
+
+      /*
+       * ★ 一定要 preventDefault：不拦的话浏览器会按自己的节奏先瞬移一次，
+       *   我们的动画再叠上去，观感就是"抖一下再滑"。
+       *
+       * 而这件事只有**非 passive** 的监听器里才做得到 —— React 把 wheel
+       * 统一挂在 root 上、且声明为 passive，所以在 onWheel 属性里调
+       * preventDefault 不但无效，控制台还会报
+       * "Unable to preventDefault inside passive event listener"。
+       * 必须自己 addEventListener 并显式写 passive: false。
+       */
+      event.preventDefault();
+
+      scrollControlRef.current?.nudge(event.deltaY * scale);
+      userScrolledAtRef.current = performance.now();
+    };
+
+    /*
+     * 只挂在列表上，不挂 document：背后那块 3D 画布由 OrbitControls 监听 wheel
+     * 做缩放，挂到 document 会跟它抢。
+     */
+    list.addEventListener("wheel", onWheel, { passive: false });
+    // 移除时不必重复 options：只有 capture 参与匹配
+    return () => list.removeEventListener("wheel", onWheel);
+  }, [motionOn, isClient]);
+
+  /* ── 「别跟用户抢」的记账 ── */
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    /*
+     * 这几个监听器只管记录"用户刚动过"，不拦默认行为，所以照旧 passive。
+     * 它们**不依赖 motionOn** —— 动效关掉的时候，自动跟随依然要懂得让路。
+     * keydown 是给"可滚动容器默认可聚焦"兜底的：用 PageDown / 方向键滚列表，
+     * 同样算用户在自己动手。
+     */
+    const mark = () => {
+      userScrolledAtRef.current = performance.now();
+    };
+
+    const onPointerDown = () => {
+      // 手指或滚动条按下：驱动器立刻停手，否则会和原生拖动抢 scrollTop
+      scrollControlRef.current?.halt();
+      mark();
+    };
+
+    list.addEventListener("wheel", mark, { passive: true });
+    list.addEventListener("pointerdown", onPointerDown, { passive: true });
+    list.addEventListener("keydown", mark);
+    return () => {
+      list.removeEventListener("wheel", mark);
+      list.removeEventListener("pointerdown", onPointerDown);
+      list.removeEventListener("keydown", mark);
+    };
+  }, [isClient]);
+
+  /* ── 上下边缘的渐隐：滚动条是隐藏的，这是"还有内容"的唯一提示 ── */
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    const sync = () => {
+      const max = list.scrollHeight - list.clientHeight;
+      // 内容比容器还短（或正好一样）：两侧都不该出现渐隐
+      const scrollable = max > 1;
+      if (fadeTopRef.current) {
+        fadeTopRef.current.style.opacity =
+          scrollable && list.scrollTop > 2 ? "1" : "0";
+      }
+      if (fadeBottomRef.current) {
+        fadeBottomRef.current.style.opacity =
+          scrollable && list.scrollTop < max - 2 ? "1" : "0";
+      }
+    };
+
+    /*
+     * 给 scrollTop 赋值同样会触发 scroll 事件，所以自动跟随和手指滚动都被覆盖到了。
+     * 直接写 style.opacity 而不是进 state：纯副作用，不该触发重渲染
+     * （同样的理由见上面歌词那段注释）。
+     */
+    list.addEventListener("scroll", sync, { passive: true });
+    /*
+     * 首帧量一次，放 rAF 里是为了等布局稳定 —— 同步量的话这一帧列表可能还没排好版，
+     * scrollHeight 拿到的是旧值。
+     * ResizeObserver 覆盖窗口缩放和窄屏面板展开（display:none 时高度才是 0）。
+     */
+    const frame = requestAnimationFrame(sync);
+    const observer = new ResizeObserver(sync);
+    observer.observe(list);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      list.removeEventListener("scroll", sync);
+    };
+    // 曲目增减 / 面板开合都会改变列表高度，需要重新量一次；整段重建很便宜
+  }, [music.tracks.length, showList, isClient]);
+
+  /* ── 当前曲目居中 ── */
+  useEffect(() => {
+    const list = listRef.current;
+    const item = activeTrackRef.current;
+    const control = scrollControlRef.current;
+    // currentIndex 可以是 -1（一首都没放过），这时没有"当前行"可以居中
+    if (!list || !item || !control || music.currentIndex < 0) return;
+    // 窄屏歌单收着的时候列表是 display:none，量出来全是 0，居中会跑到最上面去
+    if (list.clientHeight === 0) return;
+
+    const picked = pickedRef.current;
+    pickedRef.current = false;
+
+    /*
+     * 「别跟用户抢」：他刚自己滚过（1.2 秒内），这次自动换歌就不动列表。
+     * 用户自己点的歌除外 —— 那是他明确要让这首到中间来。
+     *
+     * 做法是**直接拦掉**而不是排队：排到 1.2 秒后再突然滑一下比不滑更烦人，
+     * 而下一次换歌自然会重新对齐。
+     */
+    if (!picked && performance.now() - userScrolledAtRef.current < 1200) return;
+
+    /*
+     * ★ 只能用 offsetTop / offsetHeight，**不能用 getBoundingClientRect** ——
+     * 这一栏在 lg 上有 rotateY(-18deg)，getBoundingClientRect 给的是变换后的
+     * 屏幕坐标（X 已经被 cos18° 压掉一截），算出来是错的。
+     * offsetTop 是布局值，不受变换影响。
+     * （下面 <ol> 上那个 relative 就是为它服务的：让 offsetTop 以列表内容原点为基准。）
+     *
+     * 首尾几首因为最后那个 clamp 到不了正中 —— 要能到正中得给列表加
+     * py-[26vh] 那样的内边距（歌词栏就是这么干的），那会明显改变右栏比例，
+     * 不划算。这是有意保留的，不是 bug。
+     */
+    const top = item.offsetTop + item.offsetHeight / 2 - list.clientHeight / 2;
+
+    // 减少动效档位下直接跳过去，不留过渡
+    control.glideTo(top, !motionOn);
+    // showList 和 tracks.length 是有意放进去的：展开窄屏面板会把 clientHeight
+    // 从 0 变成真实值，增删曲目会改变 scrollHeight，两种都需要重新对齐一次
+  }, [music.currentIndex, motionOn, showList, music.tracks.length, isClient]);
 
   const ready = useCallback(() => setSceneReady(true), []);
 
@@ -435,79 +754,118 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
           {music.title}
         </h2>
 
-        <ol className="mt-6 max-h-[52vh] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {music.tracks.map((item, index) => {
-            const isActive = index === music.currentIndex;
-            const itemInfo = music.infoOf(item);
-            return (
-              <li key={`${item.server}-${item.id}-${index}`}>
-                <button
-                  type="button"
-                  onClick={() => music.playAt(index)}
-                  aria-current={isActive ? "true" : undefined}
-                  className="group pointer-events-auto relative flex w-full items-center justify-end gap-4 rounded-2xl px-3 py-2.5 text-right transition-colors duration-500 ease-[var(--ease-glide)] hover:bg-white/[0.07]"
+        {/* mt-6 放在这一层而不是留在 <ol> 上：`<ol>` 一旦进了这个 relative 外壳，
+            它的外边距就会参与外边距合并，外壳高度变得依赖它 —— 是那种看着没事、
+            改一下布局就崩的写法。 */}
+        <div className="relative mt-6">
+          {/* relative 是给每行的 offsetTop 用的：让它以列表内容原点为基准量，
+              而不是以某个不确定的定位祖先为基准 */}
+          <ol
+            ref={listRef}
+            className="relative max-h-[52vh] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {music.tracks.map((item, index) => {
+              const isActive = index === music.currentIndex;
+              const itemInfo = music.infoOf(item);
+              return (
+                <li
+                  key={`${item.server}-${item.id}-${index}`}
+                  /* 条件 ref 这个写法和歌词那边的 activeLineRef 一致 */
+                  ref={isActive ? activeTrackRef : undefined}
                 >
-                  {/*
-                    悬停时从左侧浮出一道强调色竖条。
-                    用 absolute 是为了不占布局 —— 出现时文字不会跟着横移。
-                    高度从 0 长到 7，配 opacity 一起过渡，比直接淡入更有"伸出来"的感觉。
-                  */}
-                  <span
-                    aria-hidden="true"
-                    className="absolute top-1/2 left-2 h-0 w-[2px] -translate-y-1/2 rounded-full opacity-0 transition-all duration-500 ease-[var(--ease-glide)] group-hover:h-7 group-hover:opacity-100"
-                    style={{ background: active }}
-                  />
-
-                  {/*
-                    文字块往左挪一点。整行是右对齐的，往左移等于"向外展开"，
-                    配上封面放大，一行的悬停就有了方向感，而不是单纯变个底色。
-                  */}
-                  <span className="min-w-0 flex-1 transition-transform duration-500 ease-[var(--ease-glide)] group-hover:-translate-x-1">
-                    <span
-                      className={`block truncate text-[0.9375rem] transition-colors duration-500 ${
-                        isActive
-                          ? "font-semibold text-white"
-                          : "text-white/70 group-hover:text-white"
-                      }`}
-                    >
-                      {itemInfo.name || `曲目 ${item.id}`}
-                    </span>
-                    {itemInfo.artist && (
-                      <span className="mt-0.5 block truncate font-sans text-xs text-white/40 transition-colors duration-500 group-hover:text-white/60">
-                        {itemInfo.artist}
-                      </span>
-                    )}
-                  </span>
-
-                  {isActive && <EqualizerIcon color={active} />}
-
-                  {itemInfo.cover ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- 封面走自家代理，无需图片优化器
-                    <img
-                      src={itemInfo.cover}
-                      alt=""
-                      width={48}
-                      height={48}
-                      loading="lazy"
-                      decoding="async"
-                      className={`h-12 w-12 shrink-0 rounded-xl object-cover transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:brightness-110 ${
-                        isActive
-                          ? "ring-2 ring-white/40"
-                          : "ring-1 ring-white/10 group-hover:ring-white/30"
-                      }`}
-                      style={isActive ? { boxShadow: `0 0 22px ${active}66` } : undefined}
-                    />
-                  ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // 用户自己点的歌一定居中，不等那 1.2 秒的"别跟用户抢"窗口
+                      pickedRef.current = true;
+                      music.playAt(index);
+                    }}
+                    aria-current={isActive ? "true" : undefined}
+                    className="group pointer-events-auto relative flex w-full items-center justify-end gap-4 rounded-2xl px-3 py-2.5 text-right transition-colors duration-500 ease-[var(--ease-glide)] hover:bg-white/[0.07]"
+                  >
+                    {/*
+                      悬停时从左侧浮出一道强调色竖条。
+                      用 absolute 是为了不占布局 —— 出现时文字不会跟着横移。
+                      高度从 0 长到 7，配 opacity 一起过渡，比直接淡入更有"伸出来"的感觉。
+                    */}
                     <span
                       aria-hidden="true"
-                      className="h-12 w-12 shrink-0 rounded-xl bg-white/6 ring-1 ring-white/10 transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:bg-white/10 group-hover:ring-white/30"
+                      className="absolute top-1/2 left-2 h-0 w-[2px] -translate-y-1/2 rounded-full opacity-0 transition-all duration-500 ease-[var(--ease-glide)] group-hover:h-7 group-hover:opacity-100"
+                      style={{ background: active }}
                     />
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ol>
+
+                    {/*
+                      文字块往左挪一点。整行是右对齐的，往左移等于"向外展开"，
+                      配上封面放大，一行的悬停就有了方向感，而不是单纯变个底色。
+                    */}
+                    <span className="min-w-0 flex-1 transition-transform duration-500 ease-[var(--ease-glide)] group-hover:-translate-x-1">
+                      <span
+                        className={`block truncate text-[0.9375rem] transition-colors duration-500 ${
+                          isActive
+                            ? "font-semibold text-white"
+                            : "text-white/70 group-hover:text-white"
+                        }`}
+                      >
+                        {itemInfo.name || `曲目 ${item.id}`}
+                      </span>
+                      {itemInfo.artist && (
+                        <span className="mt-0.5 block truncate font-sans text-xs text-white/40 transition-colors duration-500 group-hover:text-white/60">
+                          {itemInfo.artist}
+                        </span>
+                      )}
+                    </span>
+
+                    {isActive && <EqualizerIcon color={active} />}
+
+                    {itemInfo.cover ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- 封面走自家代理，无需图片优化器
+                      <img
+                        src={itemInfo.cover}
+                        alt=""
+                        width={48}
+                        height={48}
+                        loading="lazy"
+                        decoding="async"
+                        className={`h-12 w-12 shrink-0 rounded-xl object-cover transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:brightness-110 ${
+                          isActive
+                            ? "ring-2 ring-white/40"
+                            : "ring-1 ring-white/10 group-hover:ring-white/30"
+                        }`}
+                        style={isActive ? { boxShadow: `0 0 22px ${active}66` } : undefined}
+                      />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="h-12 w-12 shrink-0 rounded-xl bg-white/6 ring-1 ring-white/10 transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:bg-white/10 group-hover:ring-white/30"
+                      />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+
+          {/*
+            上下两道渐隐。
+
+            滚动条是隐藏的（[scrollbar-width:none]），所以这两道渐变是
+            "上面 / 下面还有内容"的唯一提示 —— 因此只在那个方向真的还有内容时
+            才出现（opacity 由上面那个 effect 直接写 DOM）。
+
+            用叠加层而不是给 <ol> 加 mask-image：改 mask 要重新栅格化整个列表，
+            而改 opacity 只走合成器。
+          */}
+          <span
+            ref={fadeTopRef}
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#05070c] to-transparent opacity-0 transition-opacity duration-300 ease-[var(--ease-smooth)]"
+          />
+          <span
+            ref={fadeBottomRef}
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#05070c] to-transparent opacity-0 transition-opacity duration-300 ease-[var(--ease-smooth)]"
+          />
+        </div>
         </div>
       </aside>
 
@@ -578,7 +936,11 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
 
             <button
               type="button"
-              onClick={music.prev}
+              onClick={() => {
+                // 用户按的上一首/下一首：一定居中，不等"别跟用户抢"那个窗口
+                pickedRef.current = true;
+                music.prev();
+              }}
               aria-label="上一首"
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
             >
@@ -603,7 +965,10 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
 
             <button
               type="button"
-              onClick={music.next}
+              onClick={() => {
+                pickedRef.current = true;
+                music.next();
+              }}
               aria-label="下一首"
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
             >

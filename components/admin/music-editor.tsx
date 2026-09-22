@@ -1,10 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  GripVertical,
   Loader2,
   Plus,
   Search,
@@ -67,12 +71,102 @@ function feeBadge(fee: number): { text: string; className: string } | null {
   return null;
 }
 
+/**
+ * 后台表单里的一行：曲目本身 + 一个**只在本地用**的行标识。
+ *
+ * ★ 为什么要往曲目对象里塞一个额外的字段，而不是另开一个 rowIds 数组：
+ *
+ * 折叠 + 拖拽之后，React 的 key 不能再是下标了 —— 拖完一条，下标和内容的
+ * 对应关系就变了，React 会按位置复用节点，展开状态、输入框里的光标全会串行。
+ * 而 key 也不能从内容里算：`id` 是用户正在编辑的字段，敲一个字符 key 就变，
+ * 整行重新挂载，**输入框在打字途中丢焦点**。
+ *
+ * 所以标识只能是"发一次、跟着对象走"。挂在对象上之后，展开、交换、splice、
+ * filter 全都自动带着它，不存在两份状态对不齐的可能。
+ *
+ * `rowId` 不保存、不进配置文件、不参与脏检查（见 serialize）。
+ */
+type TrackRow = Track & { rowId: string };
+
+/** 组件内部的配置形态。存盘前要经过 toSaved 剥掉 rowId。 */
+type EditorConfig = Omit<MusicConfig, "tracks"> & { tracks: TrackRow[] };
+
+/**
+ * 脏检查用的序列化。
+ *
+ * ★ 必须剥掉 rowId —— 不剥的话 config 永远比 initial 多一个字段，
+ *   表单一进来就顶着「未保存」。
+ *
+ * ★ 每首曲目序列化成**数组**而不是对象：对象的键序不同，字符串就不同，
+ *   「未保存」会永远亮着。原来那句 JSON.stringify(config) !== snapshot
+ *   其实已经悄悄依赖两边的键序完全一致了，这里顺手把这个隐患去掉。
+ *   语义没变：字段值一样就等于没改。
+ */
+function serialize(config: {
+  source: MusicConfig["source"];
+  apiUrl: string;
+  title: string;
+  tracks: readonly Track[];
+}): string {
+  return JSON.stringify({
+    source: config.source,
+    apiUrl: config.apiUrl,
+    title: config.title,
+    tracks: config.tracks.map((track) => [
+      track.id,
+      track.server,
+      track.name,
+      track.artist,
+      track.directUrl,
+    ]),
+  });
+}
+
+/** 送去 PUT 的请求体。形状和以前 JSON.stringify(config) 一字不差 —— rowId 绝不能进配置文件。 */
+function toSaved(config: EditorConfig): MusicConfig {
+  return {
+    source: config.source,
+    apiUrl: config.apiUrl,
+    title: config.title,
+    tracks: config.tracks.map(({ id, server, name, artist, directUrl }) => ({
+      id,
+      server,
+      name,
+      artist,
+      directUrl,
+    })),
+  };
+}
+
 export function MusicEditor({ initial }: { initial: MusicConfig }) {
   const router = useRouter();
-  const [config, setConfig] = useState<MusicConfig>(initial);
-  const [snapshot, setSnapshot] = useState(() => JSON.stringify(initial));
+  const [config, setConfig] = useState<EditorConfig>(() => ({
+    ...initial,
+    tracks: initial.tracks.map((track, index) => ({
+      ...track,
+      rowId: `t${index}`,
+    })),
+  }));
+  const [snapshot, setSnapshot] = useState(() => serialize(initial));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<SaveMessage>(null);
+
+  /**
+   * 行标识发号器。初值取初始曲目数，免得和已经发出去的 t0..t(n-1) 撞上。
+   *
+   * 用递增序号而不是 crypto.randomUUID()：这个组件会被服务端预渲染一遍，
+   * 随机会在两边各算一次。key 不进 DOM、不会报水合不一致，但"两边算出不同的
+   * 东西"这件事本身就该避免。
+   */
+  const rowSeqRef = useRef(initial.tracks.length);
+  const nextRowId = () => `t${rowSeqRef.current++}`;
+
+  /** 展开了哪几行 */
+  const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
+  /** 正在拖的行下标；null = 没在拖 */
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  /** 插入位，取值 0..曲目数 —— 是"插到第几行之前"，不是目标下标 */
+  const [dropAt, setDropAt] = useState<number | null>(null);
 
   const [fetchingInfo, setFetchingInfo] = useState(false);
   const [fetchNote, setFetchNote] = useState<string | null>(null);
@@ -85,7 +179,15 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
   const [searchedFor, setSearchedFor] = useState("");
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  const dirty = JSON.stringify(config) !== snapshot;
+  const dirty = serialize(config) !== snapshot;
+
+  /*
+   * every() 而不是 size >= length：保存后可能残留已不存在的标识，
+   * 用 size 判断会虚高，按钮文字就错了。
+   */
+  const allOpen =
+    config.tracks.length > 0 &&
+    config.tracks.every((track) => openRows.has(track.rowId));
 
   /** 有 ID 的曲目才值得抓。 */
   const ids = config.tracks
@@ -199,6 +301,19 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
    * 不存进配置文件。
    */
   function addHit(hit: NeteaseSearchHit) {
+    /*
+     * 标识在更新函数**外面**发。StrictMode 下更新函数会被调用两次，
+     * 在里面发号会平白多消耗一个号（结果仍然对，但没必要）。
+     */
+    const rowId = nextRowId();
+
+    /*
+     * 刻意**不自动展开**这一行。
+     *
+     * 搜索结果已经把歌名歌手填好了，加进去没有需要立刻改的东西；
+     * 连加十首就自动展开十行的话，折叠本身也就白做了。
+     * 反馈交给行尾那个会变成「已在歌单」的按钮。
+     */
     setConfig((previous) =>
       previous.tracks.some((track) => track.id.trim() === hit.id)
         ? previous
@@ -207,6 +322,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
             tracks: [
               ...previous.tracks,
               {
+                rowId,
                 id: hit.id,
                 server: "netease",
                 name: hit.name,
@@ -216,6 +332,78 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
             ],
           },
     );
+  }
+
+  /** 展开 / 收起一行。 */
+  function toggleRow(rowId: string) {
+    setOpenRows((previous) => {
+      const next = new Set(previous);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }
+
+  /**
+   * 全部展开 / 全部收起。
+   *
+   * 用 Set 而不是"当前展开第几个"那种单值状态，就是为了这里能表达得出来 ——
+   * 单值状态下的"全部展开"根本不存在。而且整理歌单本来就是批量活：
+   * 抓完信息往往要连着改好几首，单值会在你点开下一行的瞬间把上一行收掉，
+   * 还得重新滚回去找。
+   */
+  function toggleAllRows() {
+    setOpenRows(
+      allOpen ? new Set() : new Set(config.tracks.map((track) => track.rowId)),
+    );
+  }
+
+  /**
+   * 删掉一行。
+   *
+   * openRows 里会残留一个死标识，**故意不清** —— 它匹配不上任何活着的行，
+   * 代价只是一个 Set 条目；要清就得再穿一次状态更新进删除流程，不划算。
+   */
+  function removeTrack(index: number) {
+    setConfig((previous) => ({
+      ...previous,
+      tracks: previous.tracks.filter((_, i) => i !== index),
+    }));
+  }
+
+  /** 新增一个空行，并**自动展开** —— 它是空的，下一步就是往里填 ID。 */
+  function addEmptyTrack() {
+    const rowId = nextRowId();
+    setConfig((previous) => ({
+      ...previous,
+      tracks: [
+        ...previous.tracks,
+        { rowId, id: "", server: "netease", name: "", artist: "", directUrl: "" },
+      ],
+    }));
+    setOpenRows((previous) => new Set(previous).add(rowId));
+  }
+
+  /**
+   * 把第 from 首放到 to 号**插入位**。
+   *
+   * `to` 取 0..length，含义是"插到第 to 行之前"，不是目标下标 ——
+   * 指示线画在行的上沿，两端都用插入位表示就不会出现经典的差一位错误。
+   */
+  function dropTrack(from: number, to: number) {
+    setConfig((previous) => {
+      if (from < 0 || from >= previous.tracks.length) return previous;
+
+      const target = to > from ? to - 1 : to;
+      // 原地放下：连重渲染都不必，也不会平白把表单弄脏
+      if (target === from) return previous;
+
+      const next = [...previous.tracks];
+      const [moved] = next.splice(from, 1);
+      next.splice(target, 0, moved);
+      // 整个对象搬移，rowId 自动跟着走 —— 这就是把它挂在对象上的回报
+      return { ...previous, tracks: next };
+    });
   }
 
   function updateTrack(index: number, patch: Partial<Track>) {
@@ -245,7 +433,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
       const response = await fetch("/api/admin/music", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify(toSaved(config)),
       });
 
       const data = (await response.json().catch(() => ({}))) as {
@@ -258,8 +446,22 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
         return;
       }
 
-      setConfig(data.music);
-      setSnapshot(JSON.stringify(data.music));
+      // 先取成 const —— 收窄后的类型才能带进 setConfig 的回调里
+      const saved = data.music;
+      setConfig((previous) => ({
+        ...saved,
+        tracks: saved.tracks.map((track, index) => ({
+          ...track,
+          /*
+           * 服务端会丢掉"既没有 ID 又没有直链"的空行（见 lib/content/music.ts 的
+           * saveMusicConfig），回来的数组可能比发出去时短，所以不能直接切旧数组。
+           * 按位置沿用旧标识只是为了让已展开的行尽量别乱跳；真错位了也无所谓 ——
+           * 标识只需要唯一。为这个在客户端复刻一遍服务端的过滤规则不值得。
+           */
+          rowId: previous.tracks[index]?.rowId ?? nextRowId(),
+        })),
+      }));
+      setSnapshot(serialize(saved));
       setMessage({ kind: "ok", text: "已保存，刷新前台即可看到" });
       router.refresh();
     } catch {
@@ -495,153 +697,347 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
 
       <Section
         title={`曲目（${config.tracks.length} 首）`}
-        description="填平台歌曲 ID 即可，歌名和歌手留空也能播，但填上体验更好。"
+        description="填平台歌曲 ID 即可，歌名和歌手留空也能播，但填上体验更好。拖动左侧把手调整顺序，点一行展开编辑。"
       >
-        <ul className="space-y-3">
-          {config.tracks.map((track, index) => (
-            <li
-              key={index}
-              className="rounded-tile border border-ink/8 p-4 dark:border-white/8"
-            >
-              <div className="flex items-center justify-between">
-                <span className="index-num">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => moveTrack(index, -1)}
-                    disabled={index === 0}
-                    title="上移"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-ink/5 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-white/5"
+        <ul
+          className="space-y-2"
+          onDragOver={(event) => {
+            /*
+             * 列表本身也要拦一下：行与行之间有 space-y-2 的缝隙，光标落在缝隙里
+             * 不会触发任何一行的 dragover —— 而不 preventDefault 就等于放弃 drop 资格。
+             * 这里不重算插入位，沿用最后一次算出来的那个。
+             */
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          }}
+          onDragLeave={(event) => {
+            // 在行与行之间移动也会触发 dragleave，只有真的离开整个列表才清空
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setDropAt(null);
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (dragFrom !== null && dropAt !== null) dropTrack(dragFrom, dropAt);
+            setDragFrom(null);
+            setDropAt(null);
+          }}
+        >
+          {config.tracks.map((track, index) => {
+            const open = openRows.has(track.rowId);
+            const bodyId = `track-body-${track.rowId}`;
+            /*
+             * 歌名空着时显示「曲目 <ID>」。措辞和前台歌单保持一致
+             * （music-stage.tsx 里的 itemInfo.name || `曲目 ${item.id}`）——
+             * 只有 ID 的行一眼认不出是哪首，留空更糟。
+             */
+            const title = track.name || (track.id ? `曲目 ${track.id}` : "未命名曲目");
+            const platform =
+              SERVERS.find((server) => server.value === track.server)?.label ??
+              track.server;
+            // 既没 ID 又没直链的行，保存时会被服务端悄悄丢掉（见 saveMusicConfig）
+            const unsaveable = !track.id.trim() && !track.directUrl.trim();
+
+            return (
+              <li
+                key={track.rowId}
+                onDragOver={(event) => {
+                  /*
+                   * 按**这一行自己的**矩形算插入位，不假定所有行等高 ——
+                   * 有的行展开着、有的收着，高度差很多。
+                   * 光标过了这行的中线就插到它下面。
+                   */
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setDropAt(
+                    index + (event.clientY > rect.top + rect.height / 2 ? 1 : 0),
+                  );
+                }}
+                className={`relative rounded-tile border border-ink/8 transition-opacity dark:border-white/8 ${
+                  dragFrom === index ? "opacity-40" : ""
+                }`}
+              >
+                {/*
+                  插入位置指示线。absolute 不占布局，所以出现/消失时下面的行不会跳。
+                  每行只画上沿那一条，覆盖插入位 0..n-1；插入位 n（放到最后）
+                  没有"下一行"可以借，所以只有最后一行额外补一条下沿的。
+                */}
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute inset-x-1 -top-1.5 h-0.5 rounded-full bg-jade shadow-[0_0_8px_var(--color-jade)] transition-opacity duration-200 ease-[var(--ease-smooth)] dark:bg-jade-pale ${
+                    dropAt === index ? "opacity-100" : "opacity-0"
+                  }`}
+                />
+                {index === config.tracks.length - 1 && (
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none absolute inset-x-1 -bottom-1.5 h-0.5 rounded-full bg-jade shadow-[0_0_8px_var(--color-jade)] transition-opacity duration-200 ease-[var(--ease-smooth)] dark:bg-jade-pale ${
+                      dropAt === config.tracks.length ? "opacity-100" : "opacity-0"
+                    }`}
+                  />
+                )}
+
+                <div className="flex items-center gap-1.5 p-2">
+                  {/*
+                    拖拽把手。
+
+                    必须是 span 而不是 button：Firefox / Safari 从 <button> 上起拖
+                    不可靠。也正因如此它**不能**加 role="button" —— 那会变成读屏
+                    念得出来、却没法操作的东西（HTML5 拖拽本来就不支持键盘）。
+                    键盘改顺序的正道是展开后那对上下移按钮。
+
+                    pointer-coarse:hidden：手机上 HTML5 拖拽根本不触发，
+                    留着就是个死控件 —— 触屏改顺序同样走那对上下移按钮。
+                  */}
+                  <span
+                    draggable
+                    aria-hidden="true"
+                    onDragStart={(event) => {
+                      // Firefox 不 setData 就压根不起拖
+                      event.dataTransfer.setData("text/plain", track.rowId);
+                      event.dataTransfer.effectAllowed = "move";
+                      // 默认拖影是光标下这个小把手，太小认不出是第几首 —— 换成整行
+                      const row = (event.currentTarget as HTMLElement).closest("li");
+                      if (row) event.dataTransfer.setDragImage(row, 16, 16);
+                      setDragFrom(index);
+                    }}
+                    onDragEnd={() => {
+                      /*
+                       * 在列表外松手、或按 Esc 取消，都要清干净。
+                       * 事件顺序是 drop 先于 dragend，所以这里不会抢在 onDrop 前面抹掉状态。
+                       */
+                      setDragFrom(null);
+                      setDropAt(null);
+                    }}
+                    className="pointer-coarse:hidden inline-flex h-8 w-6 shrink-0 cursor-grab items-center justify-center rounded text-ink-faint select-none hover:bg-ink/5 active:cursor-grabbing dark:text-slate-500 dark:hover:bg-white/5"
                   >
-                    <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span className="sr-only">上移</span>
-                  </button>
+                    <GripVertical className="h-3.5 w-3.5" />
+                  </span>
+
                   <button
                     type="button"
-                    onClick={() => moveTrack(index, 1)}
-                    disabled={index === config.tracks.length - 1}
-                    title="下移"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-ink/5 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-white/5"
+                    onClick={() => toggleRow(track.rowId)}
+                    aria-expanded={open}
+                    aria-controls={bodyId}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded px-1.5 py-1 text-left transition-colors hover:bg-ink/5 dark:hover:bg-white/5"
                   >
-                    <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span className="sr-only">下移</span>
+                    <span className="index-num shrink-0">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+
+                    <span
+                      className={`min-w-0 flex-1 truncate font-sans text-sm ${
+                        track.name
+                          ? "font-semibold text-ink dark:text-white"
+                          : "text-ink-faint dark:text-slate-500"
+                      }`}
+                    >
+                      {title}
+                    </span>
+
+                    {track.artist && (
+                      <span className="hidden max-w-[10rem] shrink-0 truncate font-sans text-xs text-ink-faint sm:block dark:text-slate-500">
+                        {track.artist}
+                      </span>
+                    )}
+
+                    {unsaveable && (
+                      <span
+                        title="既没有歌曲 ID 也没有直链，保存时会被丢掉"
+                        className="hidden shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 font-sans text-[0.6875rem] font-semibold text-amber-700 sm:block dark:text-amber-400"
+                      >
+                        待填
+                      </span>
+                    )}
+
+                    <span className="hidden shrink-0 rounded-full bg-ink/5 px-2 py-0.5 font-sans text-[0.6875rem] text-ink-muted sm:block dark:bg-white/8 dark:text-slate-400">
+                      {platform}
+                    </span>
+
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={`h-3.5 w-3.5 shrink-0 text-ink-faint transition-transform duration-300 ease-[var(--ease-spring)] dark:text-slate-500 ${
+                        open ? "rotate-180" : ""
+                      }`}
+                    />
                   </button>
+
                   <button
                     type="button"
-                    onClick={() =>
-                      setConfig((previous) => ({
-                        ...previous,
-                        tracks: previous.tracks.filter((_, i) => i !== index),
-                      }))
-                    }
+                    onClick={() => removeTrack(index)}
                     title="删除"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-red-500/10 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400"
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-red-500/10 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400"
                   >
                     <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     <span className="sr-only">删除</span>
                   </button>
                 </div>
-              </div>
 
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-4">
-                <div>
-                  <label htmlFor={`server-${index}`} className={labelClass}>
-                    平台
-                  </label>
-                  <select
-                    id={`server-${index}`}
-                    value={track.server}
-                    onChange={(event) => updateTrack(index, { server: event.target.value })}
-                    className={inputClass}
+                {/*
+                  展开区**整块挂载 / 卸载**，不做高度动画。
+
+                  不做 max-h 或 grid-rows 过渡是有意的：那要求折叠时也把内容留在
+                  DOM 里，17 首就是 17 个 select + 85 个 input 常驻 ——
+                  和 ui.tsx 里"隐藏的分区根本不产出 DOM"那条既定做法正好相反。
+                  观感上的"展开"交给 .row-open 那个纯透明度动画。
+                */}
+                {open && (
+                  <div
+                    id={bodyId}
+                    className="row-open border-t border-ink/8 p-4 pt-3 dark:border-white/8"
                   >
-                    {SERVERS.map((server) => (
-                      <option key={server.value} value={server.value}>
-                        {server.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                      <div>
+                        <label htmlFor={`server-${track.rowId}`} className={labelClass}>
+                          平台
+                        </label>
+                        <select
+                          id={`server-${track.rowId}`}
+                          value={track.server}
+                          onChange={(event) =>
+                            updateTrack(index, { server: event.target.value })
+                          }
+                          className={inputClass}
+                        >
+                          {SERVERS.map((server) => (
+                            <option key={server.value} value={server.value}>
+                              {server.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                <div>
-                  <label htmlFor={`id-${index}`} className={labelClass}>
-                    歌曲 ID 或链接
-                  </label>
-                  <input
-                    id={`id-${index}`}
-                    value={track.id}
-                    onChange={(event) => updateTrack(index, { id: event.target.value })}
-                    placeholder="直接粘贴歌曲链接也行"
-                    className={`${inputClass} font-mono`}
-                  />
-                  <p className={hintClass}>
-                    去网易云打开那首歌，复制地址栏的链接粘进来就行。
-                  </p>
-                </div>
+                      <div>
+                        <label htmlFor={`id-${track.rowId}`} className={labelClass}>
+                          歌曲 ID 或链接
+                        </label>
+                        <input
+                          id={`id-${track.rowId}`}
+                          value={track.id}
+                          onChange={(event) =>
+                            updateTrack(index, { id: event.target.value })
+                          }
+                          placeholder="直接粘贴歌曲链接也行"
+                          className={`${inputClass} font-mono`}
+                        />
+                        <p className={hintClass}>
+                          去网易云打开那首歌，复制地址栏的链接粘进来就行。
+                        </p>
+                      </div>
 
-                <div>
-                  <label htmlFor={`name-${index}`} className={labelClass}>
-                    歌名
-                  </label>
-                  <input
-                    id={`name-${index}`}
-                    value={track.name}
-                    onChange={(event) => updateTrack(index, { name: event.target.value })}
-                    className={inputClass}
-                  />
-                </div>
+                      <div>
+                        <label htmlFor={`name-${track.rowId}`} className={labelClass}>
+                          歌名
+                        </label>
+                        <input
+                          id={`name-${track.rowId}`}
+                          value={track.name}
+                          onChange={(event) =>
+                            updateTrack(index, { name: event.target.value })
+                          }
+                          className={inputClass}
+                        />
+                      </div>
 
-                <div>
-                  <label htmlFor={`artist-${index}`} className={labelClass}>
-                    歌手
-                  </label>
-                  <input
-                    id={`artist-${index}`}
-                    value={track.artist}
-                    onChange={(event) => updateTrack(index, { artist: event.target.value })}
-                    className={inputClass}
-                  />
-                </div>
-              </div>
+                      <div>
+                        <label htmlFor={`artist-${track.rowId}`} className={labelClass}>
+                          歌手
+                        </label>
+                        <input
+                          id={`artist-${track.rowId}`}
+                          value={track.artist}
+                          onChange={(event) =>
+                            updateTrack(index, { artist: event.target.value })
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+                    </div>
 
-              <div className="mt-3">
-                <label htmlFor={`direct-${index}`} className={labelClass}>
-                  音频直链（选填，填了就优先用它，不走音源）
-                </label>
-                <input
-                  id={`direct-${index}`}
-                  value={track.directUrl}
-                  onChange={(event) => updateTrack(index, { directUrl: event.target.value })}
-                  placeholder="/uploads/song.mp3"
-                  className={`${inputClass} font-mono`}
-                />
-                <p className={hintClass}>
-                  这里要的是<strong className="font-semibold">音频文件</strong>的地址（以 .mp3 / .m4a 结尾，或你自己传到
-                  uploads/ 的路径），不是歌曲的网页地址。
-                  网易云的分享链接请填在上面的「歌曲 ID 或链接」里。
-                </p>
-              </div>
-            </li>
-          ))}
+                    <div className="mt-3">
+                      <label htmlFor={`direct-${track.rowId}`} className={labelClass}>
+                        音频直链（选填，填了就优先用它，不走音源）
+                      </label>
+                      <input
+                        id={`direct-${track.rowId}`}
+                        value={track.directUrl}
+                        onChange={(event) =>
+                          updateTrack(index, { directUrl: event.target.value })
+                        }
+                        placeholder="/uploads/song.mp3"
+                        className={`${inputClass} font-mono`}
+                      />
+                      <p className={hintClass}>
+                        这里要的是<strong className="font-semibold">音频文件</strong>的地址（以 .mp3 / .m4a 结尾，或你自己传到
+                        uploads/ 的路径），不是歌曲的网页地址。
+                        网易云的分享链接请填在上面的「歌曲 ID 或链接」里。
+                      </p>
+                    </div>
+
+                    {/*
+                      键盘改顺序的唯一入口。拖拽天生不支持键盘，所以这对按钮
+                      不能省 —— 放在展开区里而不是折叠行上，是为了让紧凑行保持干净。
+                    */}
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <p className={hintClass}>
+                        拖动左侧把手可以调整顺序；键盘上用这里的上下移。
+                      </p>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveTrack(index, -1)}
+                          disabled={index === 0}
+                          title="上移"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-ink/5 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-white/5"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span className="sr-only">上移</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveTrack(index, 1)}
+                          disabled={index === config.tracks.length - 1}
+                          title="下移"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-ink/5 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-white/5"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span className="sr-only">下移</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() =>
-              setConfig((previous) => ({
-                ...previous,
-                tracks: [
-                  ...previous.tracks,
-                  { id: "", server: "netease", name: "", artist: "", directUrl: "" },
-                ],
-              }))
-            }
+            onClick={addEmptyTrack}
             className="inline-flex items-center gap-2 rounded-tile border border-jade/30 bg-jade/10 px-4 py-2 font-sans text-sm font-semibold text-jade transition-colors hover:bg-jade/20 dark:text-jade-pale"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             添加曲目
+          </button>
+
+          {/*
+            一个按钮而不是"展开全部 / 收起全部"两个：allOpen 是派生的，
+            所以按钮文字永远是对下一步动作的正确描述。
+          */}
+          <button
+            type="button"
+            onClick={toggleAllRows}
+            disabled={config.tracks.length === 0}
+            className="inline-flex items-center gap-2 rounded-tile border border-ink/12 px-4 py-2 font-sans text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 disabled:opacity-50 dark:border-white/12 dark:text-slate-300 dark:hover:bg-white/5"
+          >
+            {allOpen ? (
+              <ChevronsDownUp className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <ChevronsUpDown className="h-4 w-4" aria-hidden="true" />
+            )}
+            {allOpen ? "全部收起" : "全部展开"}
           </button>
 
           {/* 内置音源下可以一键把歌名歌手填好，省得手敲 */}
