@@ -294,10 +294,13 @@ export function NowPlayingCard() {
             key={lineIndex}
             /*
              * 卡片这边只显示当前这一句，而且 key 跟着行号走 —— 换句就整块重挂载，
-             * 过渡本来就用不上，用静态的 .lyric-glow 常亮即可
-             * （它带 line-clamp-2，也不能用 ::after 覆盖层，那层不会被裁）。
+             * 淡入动画自然重放一次，过渡本来就用不上。
+             *
+             * 刻意**不加**发光：发光留给舞台那一句（.lyric-halo）就够了。
+             * 何况这里带 line-clamp-2，::after 覆盖层不会被裁切，
+             * 超过两行时发光会漫出去。
              */
-            className="lyric-line lyric-glow line-clamp-2 text-[0.9375rem] leading-snug text-jade dark:text-jade-pale"
+            className="lyric-line line-clamp-2 text-[0.9375rem] leading-snug text-jade dark:text-jade-pale"
           >
             {lyricText}
           </p>

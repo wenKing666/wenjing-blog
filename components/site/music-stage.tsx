@@ -143,8 +143,6 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
    */
   const listRef = useRef<HTMLOListElement | null>(null);
   const activeTrackRef = useRef<HTMLLIElement | null>(null);
-  const fadeTopRef = useRef<HTMLSpanElement | null>(null);
-  const fadeBottomRef = useRef<HTMLSpanElement | null>(null);
 
   /**
    * 用户最后一次自己动列表的时刻。
@@ -467,48 +465,6 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
     };
   }, [isClient]);
 
-  /* ── 上下边缘的渐隐：滚动条是隐藏的，这是"还有内容"的唯一提示 ── */
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-
-    const sync = () => {
-      const max = list.scrollHeight - list.clientHeight;
-      // 内容比容器还短（或正好一样）：两侧都不该出现渐隐
-      const scrollable = max > 1;
-      if (fadeTopRef.current) {
-        fadeTopRef.current.style.opacity =
-          scrollable && list.scrollTop > 2 ? "1" : "0";
-      }
-      if (fadeBottomRef.current) {
-        fadeBottomRef.current.style.opacity =
-          scrollable && list.scrollTop < max - 2 ? "1" : "0";
-      }
-    };
-
-    /*
-     * 给 scrollTop 赋值同样会触发 scroll 事件，所以自动跟随和手指滚动都被覆盖到了。
-     * 直接写 style.opacity 而不是进 state：纯副作用，不该触发重渲染
-     * （同样的理由见上面歌词那段注释）。
-     */
-    list.addEventListener("scroll", sync, { passive: true });
-    /*
-     * 首帧量一次，放 rAF 里是为了等布局稳定 —— 同步量的话这一帧列表可能还没排好版，
-     * scrollHeight 拿到的是旧值。
-     * ResizeObserver 覆盖窗口缩放和窄屏面板展开（display:none 时高度才是 0）。
-     */
-    const frame = requestAnimationFrame(sync);
-    const observer = new ResizeObserver(sync);
-    observer.observe(list);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      list.removeEventListener("scroll", sync);
-    };
-    // 曲目增减 / 面板开合都会改变列表高度，需要重新量一次；整段重建很便宜
-  }, [music.tracks.length, showList, isClient]);
-
   /* ── 当前曲目居中 ── */
   useEffect(() => {
     const list = listRef.current;
@@ -754,118 +710,92 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
           {music.title}
         </h2>
 
-        {/* mt-6 放在这一层而不是留在 <ol> 上：`<ol>` 一旦进了这个 relative 外壳，
-            它的外边距就会参与外边距合并，外壳高度变得依赖它 —— 是那种看着没事、
-            改一下布局就崩的写法。 */}
-        <div className="relative mt-6">
-          {/* relative 是给每行的 offsetTop 用的：让它以列表内容原点为基准量，
-              而不是以某个不确定的定位祖先为基准 */}
-          <ol
-            ref={listRef}
-            className="relative max-h-[52vh] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {music.tracks.map((item, index) => {
-              const isActive = index === music.currentIndex;
-              const itemInfo = music.infoOf(item);
-              return (
-                <li
-                  key={`${item.server}-${item.id}-${index}`}
-                  /* 条件 ref 这个写法和歌词那边的 activeLineRef 一致 */
-                  ref={isActive ? activeTrackRef : undefined}
+        {/* relative 是给每行的 offsetTop 用的：让它以列表内容原点为基准量，
+            而不是以某个不确定的定位祖先为基准 */}
+        <ol
+          ref={listRef}
+          className="mt-6 relative max-h-[52vh] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {music.tracks.map((item, index) => {
+            const isActive = index === music.currentIndex;
+            const itemInfo = music.infoOf(item);
+            return (
+              <li
+                key={`${item.server}-${item.id}-${index}`}
+                /* 条件 ref 这个写法和歌词那边的 activeLineRef 一致 */
+                ref={isActive ? activeTrackRef : undefined}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    // 用户自己点的歌一定居中，不等那 1.2 秒的"别跟用户抢"窗口
+                    pickedRef.current = true;
+                    music.playAt(index);
+                  }}
+                  aria-current={isActive ? "true" : undefined}
+                  className="group pointer-events-auto relative flex w-full items-center justify-end gap-4 rounded-2xl px-3 py-2.5 text-right transition-colors duration-500 ease-[var(--ease-glide)] hover:bg-white/[0.07]"
                 >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // 用户自己点的歌一定居中，不等那 1.2 秒的"别跟用户抢"窗口
-                      pickedRef.current = true;
-                      music.playAt(index);
-                    }}
-                    aria-current={isActive ? "true" : undefined}
-                    className="group pointer-events-auto relative flex w-full items-center justify-end gap-4 rounded-2xl px-3 py-2.5 text-right transition-colors duration-500 ease-[var(--ease-glide)] hover:bg-white/[0.07]"
-                  >
-                    {/*
-                      悬停时从左侧浮出一道强调色竖条。
-                      用 absolute 是为了不占布局 —— 出现时文字不会跟着横移。
-                      高度从 0 长到 7，配 opacity 一起过渡，比直接淡入更有"伸出来"的感觉。
-                    */}
+                  {/*
+                    悬停时从左侧浮出一道强调色竖条。
+                    用 absolute 是为了不占布局 —— 出现时文字不会跟着横移。
+                    高度从 0 长到 7，配 opacity 一起过渡，比直接淡入更有"伸出来"的感觉。
+                  */}
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-1/2 left-2 h-0 w-[2px] -translate-y-1/2 rounded-full opacity-0 transition-all duration-500 ease-[var(--ease-glide)] group-hover:h-7 group-hover:opacity-100"
+                    style={{ background: active }}
+                  />
+
+                  {/*
+                    文字块往左挪一点。整行是右对齐的，往左移等于"向外展开"，
+                    配上封面放大，一行的悬停就有了方向感，而不是单纯变个底色。
+                  */}
+                  <span className="min-w-0 flex-1 transition-transform duration-500 ease-[var(--ease-glide)] group-hover:-translate-x-1">
+                    <span
+                      className={`block truncate text-[0.9375rem] transition-colors duration-500 ${
+                        isActive
+                          ? "font-semibold text-white"
+                          : "text-white/70 group-hover:text-white"
+                      }`}
+                    >
+                      {itemInfo.name || `曲目 ${item.id}`}
+                    </span>
+                    {itemInfo.artist && (
+                      <span className="mt-0.5 block truncate font-sans text-xs text-white/40 transition-colors duration-500 group-hover:text-white/60">
+                        {itemInfo.artist}
+                      </span>
+                    )}
+                  </span>
+
+                  {isActive && <EqualizerIcon color={active} />}
+
+                  {itemInfo.cover ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- 封面走自家代理，无需图片优化器
+                    <img
+                      src={itemInfo.cover}
+                      alt=""
+                      width={48}
+                      height={48}
+                      loading="lazy"
+                      decoding="async"
+                      className={`h-12 w-12 shrink-0 rounded-xl object-cover transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:brightness-110 ${
+                        isActive
+                          ? "ring-2 ring-white/40"
+                          : "ring-1 ring-white/10 group-hover:ring-white/30"
+                      }`}
+                      style={isActive ? { boxShadow: `0 0 22px ${active}66` } : undefined}
+                    />
+                  ) : (
                     <span
                       aria-hidden="true"
-                      className="absolute top-1/2 left-2 h-0 w-[2px] -translate-y-1/2 rounded-full opacity-0 transition-all duration-500 ease-[var(--ease-glide)] group-hover:h-7 group-hover:opacity-100"
-                      style={{ background: active }}
+                      className="h-12 w-12 shrink-0 rounded-xl bg-white/6 ring-1 ring-white/10 transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:bg-white/10 group-hover:ring-white/30"
                     />
-
-                    {/*
-                      文字块往左挪一点。整行是右对齐的，往左移等于"向外展开"，
-                      配上封面放大，一行的悬停就有了方向感，而不是单纯变个底色。
-                    */}
-                    <span className="min-w-0 flex-1 transition-transform duration-500 ease-[var(--ease-glide)] group-hover:-translate-x-1">
-                      <span
-                        className={`block truncate text-[0.9375rem] transition-colors duration-500 ${
-                          isActive
-                            ? "font-semibold text-white"
-                            : "text-white/70 group-hover:text-white"
-                        }`}
-                      >
-                        {itemInfo.name || `曲目 ${item.id}`}
-                      </span>
-                      {itemInfo.artist && (
-                        <span className="mt-0.5 block truncate font-sans text-xs text-white/40 transition-colors duration-500 group-hover:text-white/60">
-                          {itemInfo.artist}
-                        </span>
-                      )}
-                    </span>
-
-                    {isActive && <EqualizerIcon color={active} />}
-
-                    {itemInfo.cover ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- 封面走自家代理，无需图片优化器
-                      <img
-                        src={itemInfo.cover}
-                        alt=""
-                        width={48}
-                        height={48}
-                        loading="lazy"
-                        decoding="async"
-                        className={`h-12 w-12 shrink-0 rounded-xl object-cover transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:brightness-110 ${
-                          isActive
-                            ? "ring-2 ring-white/40"
-                            : "ring-1 ring-white/10 group-hover:ring-white/30"
-                        }`}
-                        style={isActive ? { boxShadow: `0 0 22px ${active}66` } : undefined}
-                      />
-                    ) : (
-                      <span
-                        aria-hidden="true"
-                        className="h-12 w-12 shrink-0 rounded-xl bg-white/6 ring-1 ring-white/10 transition-all duration-500 ease-[var(--ease-glide)] group-hover:scale-[1.09] group-hover:bg-white/10 group-hover:ring-white/30"
-                      />
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-
-          {/*
-            上下两道渐隐。
-
-            滚动条是隐藏的（[scrollbar-width:none]），所以这两道渐变是
-            "上面 / 下面还有内容"的唯一提示 —— 因此只在那个方向真的还有内容时
-            才出现（opacity 由上面那个 effect 直接写 DOM）。
-
-            用叠加层而不是给 <ol> 加 mask-image：改 mask 要重新栅格化整个列表，
-            而改 opacity 只走合成器。
-          */}
-          <span
-            ref={fadeTopRef}
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#05070c] to-transparent opacity-0 transition-opacity duration-300 ease-[var(--ease-smooth)]"
-          />
-          <span
-            ref={fadeBottomRef}
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#05070c] to-transparent opacity-0 transition-opacity duration-300 ease-[var(--ease-smooth)]"
-          />
-        </div>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
         </div>
       </aside>
 

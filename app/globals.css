@@ -502,17 +502,6 @@
    * 越往外 alpha 越低是"柔和"的关键 —— 三层都实的话会变成霓虹灯管。
    */
   /*
-   * 静态发光。侧栏那张卡片用 —— 它只显示当前一句、而且换句时整块重挂载，
-   * 过渡本来就用不上，直接常亮最简单。
-   */
-  .lyric-glow {
-    text-shadow:
-      0 0 4px currentColor,
-      0 0 12px currentColor,
-      0 0 26px currentColor;
-  }
-
-  /*
    * ══ 舞台歌词的发光（会亮起来的那一句）══
    *
    * ★ 用伪元素的 **opacity** 过渡，**绝不要去过渡 text-shadow**。
