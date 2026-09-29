@@ -47,10 +47,10 @@ function getSnapshot(): Theme {
  * 正常情况下服务端渲染的 <html> class 已经是对的，这个值和 DOM 一致，
  * 水合不会报不匹配。只有在 cookie 与服务端渲染结果不一致的极端情况下
  * （比如同一页面开着两个标签页、其中一个切了主题），
- * 这里会先返回 "dark"，随后 React 立刻切到真实值。
+ * 这里会先返回默认的 light，随后 React 立刻切到真实值。
  */
 function getServerSnapshot(): Theme {
-  return "dark";
+  return "light";
 }
 
 /**

@@ -56,3 +56,47 @@ export function formatLocalDate(iso: string): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
+
+/**
+ * 日历日工具。
+ *
+ * 全站日期都是 `YYYY-MM-DD` 字符串，一律按**本地日历日**算。
+ * 关键点：不要用 `new Date("2026-09-18")` —— 那按 UTC 解析，
+ * 在东八区再和本地时间相减就差 8 小时，算出来的天数偶尔会少一天，
+ * 而这种"少一天"在界面上几乎看不出来。
+ */
+const DAY_MS = 86_400_000;
+
+/** `YYYY-MM-DD` → 本地零点 Date。格式不对返回 null，不抛。 */
+export function parseDayKey(key: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/** 本地 Date → `YYYY-MM-DD`。 */
+export function dayKeyOf(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** 相差几天。任一侧不是合法日期就返回 0，免得把 NaN 带到界面上。 */
+export function daysBetween(fromKey: string, toKey: string): number {
+  const from = parseDayKey(fromKey);
+  const to = parseDayKey(toKey);
+  if (!from || !to) return 0;
+  // 用 round 而不是 floor：夏令时会让差值带上 ±1 小时
+  return Math.round((to.getTime() - from.getTime()) / DAY_MS);
+}
+
+/** 在本地零点上加减天数。 */
+export function addDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+/** 所在周的周一（本地零点）。热力图按周分列，所以每列都从周一起。 */
+export function mondayOf(date: Date): Date {
+  const weekday = (date.getDay() + 6) % 7;
+  return addDays(date, -weekday);
+}

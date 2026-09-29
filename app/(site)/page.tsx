@@ -6,21 +6,55 @@ import { NowPlayingCard } from "@/components/site/now-playing-card";
 import { getSettingsOnce } from "@/lib/content/settings";
 import { listPosts, listTags } from "@/lib/content/posts";
 import { getHitokoto } from "@/lib/hitokoto";
+import { listProjects } from "@/lib/content/projects";
+import { listAlbums } from "@/lib/content/albums";
+import { listChatters } from "@/lib/content/chatters";
+import { listMoments } from "@/lib/content/moments";
+import { SpotlightProjects } from "@/components/site/spotlight-projects";
+import { PhotoStrip } from "@/components/site/photo-strip";
+import { RecentFeed } from "@/components/site/recent-feed";
+import { WritingTrail } from "@/components/site/writing-trail";
+import { SectionIndex } from "@/components/site/section-index";
+import { daysBetween, todayLocal } from "@/lib/content/date";
 
 export default async function HomePage() {
-  const [settings, posts, tags, hitokoto] = await Promise.all([
+  const [settings, posts, tags, hitokoto, projects, albums, chatters, moments] =
+    await Promise.all([
     getSettingsOnce(),
     listPosts(),
     listTags(),
     // 拿不到就返回 null，下面那一行直接不渲染 —— 一言挂了不该让首页出错
     getHitokoto(),
+    // 首页原来只读文章，项目 / 照片 / 说说全得靠导航栏才找得到，
+    // 看着空是内容没露出来，不是内容不够
+    listProjects(),
+    listAlbums(),
+    listChatters(),
+    listMoments(),
   ]);
 
-  const latest = posts.slice(0, 6);
+  const latest = posts.slice(0, 7);
   const tagCloud = tags.slice(0, 12);
   const since = posts.length
     ? new Date(posts[posts.length - 1].date).getFullYear()
     : new Date().getFullYear();
+
+  const photoCount = albums.reduce((sum, album) => sum + album.photos.length, 0);
+
+  /*
+   * 「运行天」和写作足迹都以**站上最早的一条内容**为起点，而不是建站时间 ——
+   * 建站时间没地方记，而最早那条内容是真实存在的。
+   * 一条内容都没有时显示 1 天而不是 0：开张当天也算一天。
+   */
+  const trailDates = [
+    ...posts.map((entry) => entry.date),
+    ...chatters.map((entry) => entry.date),
+    ...moments.map((entry) => entry.date),
+  ];
+  const firstDay = trailDates
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort()[0];
+  const runningDays = firstDay ? daysBetween(firstDay, todayLocal()) + 1 : 1;
 
   return (
     <div className="mx-auto w-[92%] max-w-6xl pt-28 pb-10 sm:pt-32">
@@ -56,11 +90,12 @@ export default async function HomePage() {
 
           {/* 统计：裸数字 + 细线，不做成卡片。
               数字用等宽字体对齐，才有"数据"的感觉而不是装饰。 */}
-          <dl className="flex shrink-0 gap-8 lg:gap-10">
+          <dl className="flex shrink-0 flex-wrap gap-6 sm:gap-8 lg:gap-10">
             {[
               { label: "文章", value: posts.length },
-              { label: "标签", value: tags.length },
-              { label: "起始", value: since },
+              { label: "项目", value: projects.length },
+              { label: "照片", value: photoCount },
+              { label: "运行天", value: runningDays },
             ].map((stat) => (
               <div key={stat.label} className="border-l border-ink/12 pl-4 dark:border-white/12">
                 <dt className="font-mono text-[0.625rem] uppercase tracking-[0.18em] text-ink-faint dark:text-slate-500">
@@ -75,8 +110,15 @@ export default async function HomePage() {
         </div>
       </header>
 
+      <SectionIndex />
+
       {/* ── 主体：左边文章列表，右边标签与主题 ── */}
-      <div className="mt-16 grid grid-cols-1 gap-6 lg:mt-20 lg:grid-cols-12">
+      {/*
+        items-start 是必要的：默认的 stretch 会把矮的那一栏的面板拉到和另一栏一样高，
+        于是文章列表底下多出一大块**空玻璃**，看着像坏了。
+        让两栏各按自己的高度收尾，多出来的就是页面底色，那才是正常的留白。
+      */}
+      <div className="mt-16 grid grid-cols-1 items-start gap-6 lg:mt-20 lg:grid-cols-12">
         <section className="lg:col-span-8">
           {/*
             整份列表装在**一个**玻璃面板里，而不是每篇文章各一张卡。
@@ -160,6 +202,10 @@ export default async function HomePage() {
         </section>
 
         <aside className="reveal flex flex-col gap-6 lg:col-span-4">
+          {/* 动态放最上面 —— 它是这一栏里唯一还在生长的东西 */}
+          <RecentFeed moments={moments} chatters={chatters} />
+          <WritingTrail dates={trailDates} />
+
           {/* 右侧同样只用一块玻璃，而不是两个各自成盒的小卡 */}
           <div className="glass glass-spec space-y-9 p-6 sm:p-7">
             {/* 标签：朴素的行内文字，不做成药丸按钮堆 */}
@@ -207,6 +253,10 @@ export default async function HomePage() {
           <NowPlayingCard />
         </aside>
       </div>
+
+      {/* 下面两块把站上其余内容露出来 */}
+      <SpotlightProjects projects={projects} />
+      <PhotoStrip albums={albums} />
     </div>
   );
 }

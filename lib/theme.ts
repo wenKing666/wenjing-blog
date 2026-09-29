@@ -18,9 +18,9 @@ export const SPLASH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
 export type Theme = "light" | "dark";
 
-/** 默认暗色。cookie 缺失或值非法时都回落到它。 */
+/** 默认亮色。cookie 缺失或值非法时都回落到它。 */
 export function normalizeTheme(value: string | undefined): Theme {
-  return value === "light" ? "light" : "dark";
+  return value === "dark" ? "dark" : "light";
 }
 
 /**
