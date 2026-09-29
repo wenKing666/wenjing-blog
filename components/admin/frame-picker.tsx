@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, ImagePlus, Loader2, Search, Trash2 } from "lucide-react";
 import { compressImage } from "@/lib/image-compress";
+import { computeFrameFit } from "@/lib/frame-fit";
 // 类型从 lib/avatar-frame.ts 来，**不要**从 lib/content/frames.ts 引 ——
 // 那边的依赖链里有 node:fs，客户端组件碰不得
 import type { AvatarFrame } from "@/lib/avatar-frame";
 import { hintClass, inputClass, labelClass } from "./ui";
-import { SiteAvatar } from "@/components/site/site-avatar";
 
 /**
  * 头像框库。
@@ -78,113 +78,15 @@ async function makeThumb(url: string): Promise<string | null> {
   }
 }
 
-/**
- * 「自动贴合」：量出**不透明内容的包围盒**，算出放大几倍能让它铺满头像方框。
- *
- * ── 为什么量的是"内容"而不是"洞" ──
- *
- * 一开始我量的是中心的透明区域（洞），结果**大部分框都被过度放大了**。
- * 实测一批真实的 Steam 头像框：绝大多数是**贴边边框** —— 装饰本来就在画布边缘，
- * 按洞去算会得到一个大于 1 的倍数，把本该贴在头像边上的装饰推到外面去。
- *
- * 换成"不透明内容的包围盒"之后就对了：
- *   - 贴边边框 → 包围盒就是整张画布 → 倍数 = 1（原样贴合，和 Steam 自己的渲染一致）
- *   - 内容缩在中间的（比如圆环比画布小）→ 包围盒小 → 按比例放大
- *
- * ── 为什么还要夹在 1~2 之间 ──
- *
- * 有些框只有角落里一个小装饰（包围盒很小），按它放大等于把一个小挂件吹满整屏。
- * 上限 2 是"宁可放大不够，也不要离谱"。
- *
- * ── 这只是个按钮，不是自动的 ──
- *
- * 2045 个框来源各异，**没有任何一套算法能全自动适配**。所以默认就是 1:1，
- * 想贴合的点一下这个按钮，不满意再用手动滑块微调。
- */
-async function computeFrameFit(url: string): Promise<number> {
-  const N = 224; // 采样分辨率：够量出比例，又不必读原图那么大的像素
-  try {
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("图片加载失败"));
-      image.src = url;
-    });
-
-    const canvas = document.createElement("canvas");
-    canvas.width = N;
-    canvas.height = N;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return 1;
-    ctx.drawImage(image, 0, 0, N, N);
-
-    // 外链图片会在这里抛 SecurityError（画布被污染）—— 那就不量了
-    const data = ctx.getImageData(0, 0, N, N).data;
-
-    let minX = N;
-    let minY = N;
-    let maxX = -1;
-    let maxY = -1;
-    for (let y = 0; y < N; y += 1) {
-      for (let x = 0; x < N; x += 1) {
-        if (data[(y * N + x) * 4 + 3] <= 16) continue;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    }
-
-    if (maxX < 0) return 1; // 整张全透明，无内容可量
-
-    const contentW = (maxX - minX + 1) / N;
-    const contentH = (maxY - minY + 1) / N;
-    const content = Math.min(contentW, contentH);
-    const longest = Math.max(contentW, contentH);
-
-    /*
-     * 两条护栏 —— 挡住"不该缩放"的框。
-     *
-     * 有一类框只有角落里一个小挂件（实测有个是 55% × 20%）：
-     * 按包围盒放大等于把那个小挂件吹满整屏，非常离谱。
-     *
-     * 判据是"又小又不方正"：正常边框的内容包围盒接近正方形且占满画布，
-     * 角落挂件则又小又扁。这种一律不缩放，保持 1:1。
-     */
-    if (content < 0.5) return 1;
-    if (longest / content > 1.6) return 1;
-
-    /*
-     * 多放 15%。
-     *
-     * 只按包围盒放大的话，装饰的**外沿**刚好压在头像的**边缘**上 ——
-     * 实测看起来仍像"缩在里面"（因为框本身还有一圈极淡的边）。
-     * 多放一点让装饰压出头像边界，才读得出"围在四周"的感觉。
-     *
-     * 上限 1.5：宁可贴合得不够，也不要把装饰推得太远。
-     */
-    return Math.min(1.5, Math.max(1, (1 / content) * 1.15));
-  } catch {
-    return 1;
-  }
-}
-
 export function FramePicker({
   initial,
   value,
   scale,
-  avatar,
-  author,
   onChange,
 }: {
   initial: AvatarFrame[];
   /** 当前选中的框地址 */
   value: string;
-  /** 头像地址，用于右侧的实时预览 */
-  avatar: string;
-  /** 作者名，头像为空时显示首字 */
-  author: string;
   /** 当前放大倍数 */
   scale: number;
   /** 选中／调整。url 为空表示取消选择 */
@@ -208,6 +110,42 @@ export function FramePicker({
    */
   const [size, setSize] = useState<SizeKey>("md");
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  /*
+   * 记着「最后一次改选」。选中之后补量倍数那一步是异步的，
+   * 回来的时候要能判断用户是不是已经点别的框了。
+   */
+  const seqRef = useRef(0);
+
+  /*
+   * 记住父组件当前的倍数。
+   *
+   * 补量回来时这个值如果已经不是我们刚写下去的那个，说明用户在下面的
+   * 「头像调整」模块里手动拖过滑块了 —— 以用户为准，别拿过期的测量结果覆盖他。
+   */
+  const scaleRef = useRef(scale);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
+  /**
+   * 选中一张框，并异步量一个更贴合的倍数补上。
+   *
+   * 分两步是**为了手感**：量倍数要等图片解码完才能读像素（一张 1MB 的
+   * APNG 就是几百毫秒），等它 resolve 才更新界面的话，点了要过一会儿才能
+   * 看到选中。所以先立刻按素材的设计前提（1:1）选中，量完再修正。
+   */
+  function select(frame: AvatarFrame) {
+    const PENDING = 1;
+    const token = ++seqRef.current;
+    onChange(frame.url, PENDING);
+
+    void computeFrameFit(frame.thumb || frame.url).then((fit) => {
+      if (token !== seqRef.current) return; // 期间点了别的框
+      if (scaleRef.current !== PENDING) return; // 期间手动拖过滑块
+      onChange(frame.url, fit);
+    });
+  }
 
   /*
    * 指向最新的 frames。
@@ -491,8 +429,17 @@ export function FramePicker({
                   <div
                     key={frame.id}
                     className="group relative"
-                    onMouseEnter={() => setHovered(frame.id)}
-                    onMouseLeave={() => setHovered(null)}
+                    /*
+                     * 只认真正的鼠标悬停。
+                     *
+                     * 触屏上点一下浏览器也会补一个 mouseenter，于是那格会换成
+                     * 1MB 上下的动图开始解码 —— 手机上就是"点完卡一下"。
+                     * 触屏没有悬停这回事，选中哪张就让哪张动（上面 img 的 src 判断）。
+                     */
+                    onPointerEnter={(event) => {
+                      if (event.pointerType === "mouse") setHovered(frame.id);
+                    }}
+                    onPointerLeave={() => setHovered(null)}
                   >
                     <button
                       type="button"
@@ -511,9 +458,8 @@ export function FramePicker({
                           onChange("", 1);
                           return;
                         }
-                        void computeFrameFit(frame.url).then((fit) =>
-                          onChange(frame.url, fit),
-                        );
+                        /* 先选中、再量倍数 —— 顺序反了就是「点了半天才选上」 */
+                        select(frame);
                       }}
                       title={active ? `取消使用「${frame.name}」` : `使用「${frame.name}」`}
                       aria-pressed={active}
@@ -606,66 +552,10 @@ export function FramePicker({
             </div>
           )}
 
-          {/*
-            选中之后的微调。
-            自动算法对 2045 个来源各异的框不可能全对，所以给一个手动兜底：
-            默认 1:1（素材的设计前提），不合意的自己拖。
-          */}
-          {value && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-tile bg-ink/5 px-3 py-2.5 dark:bg-white/5">
-              {/* 实时预览：拖滑块时立刻看到头像 + 框的实际效果 */}
-              <SiteAvatar
-                src={avatar}
-                name={author}
-                frame={value}
-                scale={scale}
-                style="frame"
-                className="h-14 w-14"
-                textClassName="text-lg"
-              />
-
-              <span className="font-sans text-xs font-semibold text-ink-soft dark:text-slate-300">
-                框大小
-              </span>
-
-              <input
-                type="range"
-                min={50}
-                max={250}
-                step={5}
-                value={Math.round(scale * 100)}
-                onChange={(event) => onChange(value, Number(event.target.value) / 100)}
-                aria-label="头像框大小"
-                className="h-1.5 w-40 accent-jade sm:w-56"
-              />
-
-              <span className="tnum w-12 font-mono text-xs text-ink-muted dark:text-slate-400">
-                {Math.round(scale * 100)}%
-              </span>
-
-              <button
-                type="button"
-                onClick={() => {
-                  void computeFrameFit(value).then((fit) => onChange(value, fit));
-                }}
-                className="rounded-tile border border-jade/30 bg-jade/10 px-2.5 py-1 font-sans text-xs font-semibold text-jade transition-colors hover:bg-jade/20 dark:text-jade-pale"
-              >
-                自动贴合
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onChange(value, 1)}
-                className="rounded-tile border border-ink/15 px-2.5 py-1 font-sans text-xs font-semibold text-ink-soft transition-colors hover:border-jade/40 hover:text-jade dark:border-white/15 dark:text-slate-300"
-              >
-                重置
-              </button>
-            </div>
-          )}
-
           <p className={hintClass}>
-            点一下选中，再点一下取消。从库里移除**不会删图片文件**。
+            点一下选中，再点一下取消。从库里移除不会删图片文件。
             一次只渲染 {PAGE_SIZE} 个 —— 框再多也不会卡。
+            选中之后，到上面的预览和滑块里调大小、圆角。
           </p>
         </>
       )}

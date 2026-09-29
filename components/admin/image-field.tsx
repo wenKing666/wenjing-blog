@@ -32,6 +32,14 @@ export function ImageField({
    * 当前这张会被自动记进历史。
    */
   history = [],
+  /**
+   * 是否显示左侧那块小预览。
+   *
+   * 头像那边关掉它 —— 「头像调整」模块里已经有一个大预览了，
+   * 再多一个小预览就是两个预览各看各的。关掉之后输入框旁边会补一个清除按钮，
+   * 免得连"清空"都没了。
+   */
+  showPreview = true,
   compressOutput = "webp",
 }: {
   id: string;
@@ -43,6 +51,8 @@ export function ImageField({
   shape?: "square" | "circle";
   previewClassName?: string;
   history?: string[];
+  /** 关掉左侧预览（外层已有大预览时用），见下面说明 */
+  showPreview?: boolean;
   compressOutput?: "webp" | "jpeg";
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -96,7 +106,7 @@ export function ImageField({
 
       <div className="mt-1.5 flex items-start gap-3">
         {/* 预览。地址失效时不留破图，给一个明确的提示。 */}
-        {value && (
+        {showPreview && value && (
           <div className="relative shrink-0">
             {broken ? (
               <span
@@ -161,6 +171,22 @@ export function ImageField({
                 event.target.value = "";
               }}
             />
+
+            {!showPreview && value && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("");
+                  setBroken(false);
+                  setNotice(null);
+                }}
+                title="清除"
+                aria-label={`清除${label}`}
+                className="inline-flex shrink-0 items-center justify-center rounded-tile border border-ink/15 px-2.5 text-ink-soft transition-colors hover:border-red-400/60 hover:text-red-500 dark:border-white/15 dark:text-slate-300"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
 
             <button
               type="button"

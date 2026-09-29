@@ -29,6 +29,9 @@ export function SplashScreen({
   avatarStyle,
   avatarFrame,
   avatarFrameScale,
+  avatarFrameRadius,
+  avatarRadius,
+  avatarSize,
   motion,
   remember,
 }: {
@@ -38,6 +41,12 @@ export function SplashScreen({
   avatarStyle?: AvatarStyle;
   avatarFrame?: string;
   avatarFrameScale?: number;
+  /** 头像框自己的圆角（%），0 是直角 */
+  avatarFrameRadius?: number;
+  /** 头像圆角（%）。null = 跟随外观模式 */
+  avatarRadius?: number | null;
+  /** 头像整体大小（%），100 是基准尺寸 */
+  avatarSize?: number;
   /** 站点的动效强度设置。off 时服务端根本不会渲染它，这里再兜一层 */
   motion: MotionSetting;
   /**
@@ -150,6 +159,9 @@ export function SplashScreen({
             name={title}
             frame={avatarFrame}
             scale={avatarFrameScale}
+            frameRadius={avatarFrameRadius}
+            radius={avatarRadius}
+            size={avatarSize}
             style={avatarStyle}
             className="relative h-22 w-22"
             textClassName="text-3xl"

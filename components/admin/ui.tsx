@@ -77,6 +77,63 @@ export function Field({
   );
 }
 
+/**
+ * 带读数的滑块。
+ *
+ * 后台原来只有「粒子数量」一个滑块，样式是就地写的。头像那一组要加三个
+ * （框大小、圆角、缩放），读数、间距、单位各抄一遍太啰嗦，收到这里。
+ * children 用来塞滑块下方的附加操作（比如「跟随模式」这种次按钮）。
+ */
+export function RangeField({
+  id,
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  display,
+  hint,
+  children,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  /** 右侧读数。不传就直接显示数值 */
+  display?: string;
+  hint?: string;
+  /** 滑块下方的附加内容 */
+  children?: React.ReactNode;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor={id} className={labelClass}>
+          {label}
+        </label>
+        <span className="tnum font-mono text-xs text-ink-muted dark:text-slate-400">
+          {display ?? value}
+        </span>
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="mt-2 w-full accent-[var(--color-jade)]"
+      />
+      {hint && <p className={hintClass}>{hint}</p>}
+      {children}
+    </div>
+  );
+}
 export type SaveMessage = { kind: "ok" | "error"; text: string } | null;
 
 /** 保存状态提示条。成功用绿色、失败用红色，都带 role 让读屏能念出来。 */

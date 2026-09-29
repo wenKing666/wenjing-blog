@@ -36,6 +36,9 @@ export function ProfileCard({
           name={author}
           frame={avatarFrame}
           scale={settings.avatarFrameScale}
+          frameRadius={settings.avatarFrameRadius}
+          radius={settings.avatarRadius}
+          size={settings.avatarSize}
           style={avatarStyle}
           className="h-20 w-20"
           ringClassName="ring-2 ring-jade/35"

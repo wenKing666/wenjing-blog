@@ -91,6 +91,32 @@ export type SiteSettings = {
    */
   avatarFrameScale: number;
   /**
+   * 头像框自己的圆角，按框边长的百分比算：0 = 直角，50 = 正圆。
+   *
+   * 和 avatarRadius 分开：头像是**被框住**的那一方，两者形状互不影响 ——
+   * 有些框素材四角本就方正，把头像修圆反而对不上。
+   */
+  avatarFrameRadius: number;
+  /**
+   * 头像的圆角，按方框边长的百分比算：0 = 直角，50 = 正圆。
+   *
+   * `null` 表示**跟随外观模式** —— 圆形模式是整圆（等效 50%），
+   * 方形模式跟站上其他方块一样是 10px。留一个 null 档是为了让加了这一项
+   * 之前就存在的站点外观一个像素都不变；一旦拖过滑块就是具体数值，不再跟随。
+   */
+  avatarRadius: number | null;
+  /**
+   * 头像整体大小，百分比。100 = 各处的基准尺寸（名片 80px、开屏 88px）。
+   *
+   * 调的是**整个头像块**（连同头像框一起）的尺寸，不是图片在框里怎么裁。
+   * 站上三处头像的基准尺寸各不相同（名片、开屏、后台预览），用一个倍数去乘，
+   * 改一处就全站一致。
+   *
+   * 实现用的是 CSS `zoom` —— 它会连**布局尺寸**一起放大，名片那一行会跟着变高、
+   * 文字被推开；换成 `transform: scale` 就只有视觉放大，会压到旁边的文字上。
+   */
+  avatarSize: number;
+  /**
    * 名片上的「正在听」。手填，例如「陈奕迅 - 富士山下」。留空则整行不显示。
    *
    * 刻意做成手填而不是"自动同步你正在播的歌"：播放器是**每个访客各自的状态**，
@@ -173,6 +199,9 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   avatarStyle: "circle",
   avatarFrame: "",
   avatarFrameScale: 1,
+  avatarFrameRadius: 0,
+  avatarRadius: null,
+  avatarSize: 100,
   nowPlaying: "",
   /*
    * 关于页的默认文案。

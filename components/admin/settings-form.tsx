@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2, Save, X } from "lucide-react";
 import { ImageField } from "./image-field";
 import { ImageUploader } from "./image-uploader";
+import { AvatarTuning } from "./avatar-tuning";
 import { FramePicker } from "./frame-picker";
 import { Section } from "./ui";
 import type { SiteSettings } from "@/lib/site";
@@ -359,76 +360,51 @@ export function SettingsForm({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          <ImageField
-            id="avatar"
-            label="头像"
-            value={form.avatar}
-            onChange={(url) => set("avatar", url)}
-            shape={form.avatarStyle === "frame" ? "square" : "circle"}
-            history={form.avatarHistory}
-            hint="开屏动画和个人名片用的就是它。留空则显示名字首字。换过之后，上一张会留在下面，点一下就能换回来。"
-          />
-        </div>
-
         {/*
-          头像外观二选一。
-          做成"两种形态"而不是"是否显示框"，是因为连头像本身的裁切都不一样
-          （圆形 vs 方形），不只是多叠一层图。
+          头像的一切都收在这一个模块里 —— 图片、外观、框库、摆放。
+          见 components/admin/avatar-tuning.tsx
         */}
-        <div>
-          <span className={labelClass}>头像外观</span>
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {(
-              [
-                { key: "circle", label: "圆形 · 无框" },
-                { key: "frame", label: "方形 · 带头像框" },
-              ] as const
-            ).map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => set("avatarStyle", option.key)}
-                aria-pressed={form.avatarStyle === option.key}
-                className={`rounded-tile border px-3 py-1.5 font-sans text-sm font-semibold transition-colors ${
-                  form.avatarStyle === option.key
-                    ? "border-jade bg-jade text-white"
-                    : "border-ink/15 text-ink-soft hover:border-jade/40 hover:text-jade dark:border-white/15 dark:text-slate-300 dark:hover:text-jade-pale"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <p className={hintClass}>
-            选「带头像框」之后，头像会从圆形变成方形，并在上面叠一层框。
-          </p>
-        </div>
-
-        {form.avatarStyle === "frame" && (
-          <>
-            <FramePicker
-              initial={frames}
-              value={form.avatarFrame}
-              scale={form.avatarFrameScale}
-              avatar={form.avatar}
-              author={form.author}
-              onChange={(url, scale) => {
-                // 两个值必须一起写：倍数是为**这张**框量出来的，单独留着没意义
-                setForm((previous) => ({
-                  ...previous,
-                  avatarFrame: url,
-                  avatarFrameScale: scale,
-                }));
-              }}
-            />
-            <p className={hintClass}>
-              框必须是**带透明通道的方形图**（APNG / PNG / 透明 GIF / 动图 WebP）。
-              它和头像占同一个方框，中间透明的地方露出头像；背景不透明的话会把头像整个盖住。
-              动图的动画会被完整保留。
-            </p>
-          </>
-        )}
+        <AvatarTuning
+          avatar={form.avatar}
+          author={form.author}
+          style={form.avatarStyle}
+          frameUrl={form.avatarFrame}
+          frameThumb={frames.find((item) => item.url === form.avatarFrame)?.thumb}
+          frameScale={form.avatarFrameScale}
+          frameRadius={form.avatarFrameRadius}
+          radius={form.avatarRadius}
+          size={form.avatarSize}
+          history={form.avatarHistory}
+          onAvatar={(url) => set("avatar", url)}
+          onStyle={(style) => set("avatarStyle", style)}
+          onFrameScale={(value) => set("avatarFrameScale", value)}
+          onFrameRadius={(value) => set("avatarFrameRadius", value)}
+          onRadius={(value) => set("avatarRadius", value)}
+          onSize={(value) => set("avatarSize", value)}
+        >
+          {form.avatarStyle === "frame" && (
+            <>
+              <FramePicker
+                initial={frames}
+                value={form.avatarFrame}
+                scale={form.avatarFrameScale}
+                onChange={(url, scale) => {
+                  // 两个值必须一起写：倍数是为**这张**框量出来的，单独留着没意义
+                  setForm((previous) => ({
+                    ...previous,
+                    avatarFrame: url,
+                    avatarFrameScale: scale,
+                  }));
+                }}
+              />
+              <p className={hintClass}>
+                框必须是**带透明通道的方形图**（APNG / PNG / 透明 GIF / 动图 WebP）。
+                它和头像占同一个方框，中间透明的地方露出头像；背景不透明的话会把头像整个盖住。
+                动图的动画会被完整保留。
+              </p>
+            </>
+          )}
+        </AvatarTuning>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <ImageField

@@ -66,14 +66,45 @@ function mergeSettings(raw: unknown): SiteSettings {
       typeof input.avatarFrame === "string"
         ? input.avatarFrame
         : DEFAULT_SETTINGS.avatarFrame,
-    // 夹在合理范围：坏数据不该把框放大到糊满整屏
+    /*
+     * 夹在合理范围：坏数据不该把框放大到糊满整屏。
+     *
+     * 下限是 0.5 而不是 1 —— 后台滑块的左半边本来就落在 50%~100%，
+     * 夹成 1 的话拖到 100% 以下保存后会**静默变回默认值**，
+     * 看起来就是"滑块白拖了"。
+     */
     avatarFrameScale:
       typeof input.avatarFrameScale === "number" &&
       Number.isFinite(input.avatarFrameScale) &&
-      input.avatarFrameScale >= 1 &&
+      input.avatarFrameScale >= 0.5 &&
       input.avatarFrameScale <= 4
         ? input.avatarFrameScale
         : DEFAULT_SETTINGS.avatarFrameScale,
+    avatarFrameRadius:
+      typeof input.avatarFrameRadius === "number" &&
+      Number.isFinite(input.avatarFrameRadius) &&
+      input.avatarFrameRadius >= 0 &&
+      input.avatarFrameRadius <= 50
+        ? input.avatarFrameRadius
+        : DEFAULT_SETTINGS.avatarFrameRadius,
+    /*
+     * null 是**合法值**（跟随外观模式），所以这里不能套"类型对不上就回落
+     * 默认值"那套写法 —— 这一项的默认值本身就是 null。超出范围才回落。
+     */
+    avatarRadius:
+      typeof input.avatarRadius === "number" &&
+      Number.isFinite(input.avatarRadius) &&
+      input.avatarRadius >= 0 &&
+      input.avatarRadius <= 50
+        ? input.avatarRadius
+        : null,
+    avatarSize:
+      typeof input.avatarSize === "number" &&
+      Number.isFinite(input.avatarSize) &&
+      input.avatarSize >= 50 &&
+      input.avatarSize <= 150
+        ? input.avatarSize
+        : DEFAULT_SETTINGS.avatarSize,
     nowPlaying:
       typeof input.nowPlaying === "string"
         ? input.nowPlaying

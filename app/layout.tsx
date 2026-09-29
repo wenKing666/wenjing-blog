@@ -155,6 +155,9 @@ export default async function RootLayout({
               avatarStyle={settings.avatarStyle}
               avatarFrame={settings.avatarFrame}
               avatarFrameScale={settings.avatarFrameScale}
+              avatarFrameRadius={settings.avatarFrameRadius}
+              avatarRadius={settings.avatarRadius}
+              avatarSize={settings.avatarSize}
               motion={settings.motion}
               remember={splashMode === "session"}
             />
