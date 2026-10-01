@@ -45,14 +45,16 @@
    * 前 20% 的时间就跑完 83% 的位移，观感是"啪"地弹到位然后慢慢蹭。
    * 这正是"生硬"的来源 —— 不是没有过渡，而是过渡的节奏不对。
    *
-   * 现在按用途分三条：
+   * 现在按用途分四条：
    *   smooth  平衡的加减速，配色/透明度/阴影这类渐变用它
    *   spring  末段带一点回弹，用于位移（悬停抬起、图标滑动）—— 有"活"的手感
    *   glide   长距离位移用，收尾更柔，不会在终点突然刹住
+   *   inout   两头都慢、中间快，用于"整块内容换掉"的入场（切歌单）
    */
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
   --ease-glide: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 /* ==================================================================
@@ -1058,6 +1060,11 @@
     animation: none !important;
   }
 
+  /* 切歌单同理：只换内容，不做位移与模糊 */
+  html:not(.motion-full) .swap-in {
+    animation: none !important;
+  }
+
   html:not(.motion-full) .splash-halo,
   html:not(.motion-full) .sheen::before,
   html:not(.motion-full) .btn-primary::after {
@@ -1134,6 +1141,47 @@ html.motion-off {
 
 .row-open {
   animation: row-open 200ms var(--ease-smooth);
+}
+
+/*
+ * 切歌单：整块内容换掉时的入场。
+ *
+ * 淡入 + 轻微上浮 + 去模糊，和页面入场的配方一致（三者叠加才有"对上焦"的感觉）。
+ * 曲线用 --ease-inout —— 这条是"两头都慢、中间快"的对称曲线，
+ * 换掉一整栏内容时观感是"旧的退场、新的进场"；
+ * 用 --ease-glide（纯减速）会像"被推了一把"，头一秒就冲完，不像交接。
+ *
+ * 重放靠 key：React 把元素整个重挂载一次，CSS 动画自然从头播。
+ * 时长压在 480ms —— 比页面入场短，切歌单是个高频动作，等不得。
+ *
+ * ★ 位移写的是 `translate` 这个**独立属性**，不是 `transform`。
+ * 舞台左右两栏身上已经有 `lg:[transform:rotateY(±18deg)]`，
+ * 而动画的优先级高于普通声明：如果这里改 `transform`，
+ * 那条 `to { transform: none }` 会跟着 fill 一直生效，把 3D 倾斜整个抹掉。
+ * 「两栏向内倾斜」是舞台最核心的观感，不能这么被动画吃掉。
+ * （Tailwind 4 的 scale-/translate- 用的也是这套独立属性，见上面 globals 里的备注。）
+ *
+ * ★ 填充模式是 backwards 而不是 both。
+ * 用 both 的话动画结束后 `filter: blur(0px)` 会被一直保留（`none` 插值到终点
+ * 就是 blur(0)，不是 `none`），而 filter 只要不是 none 就会建立包含块和
+ * 层叠上下文 —— 白留一层，还会影响里面定位元素的参照。
+ * backwards 在动画结束后回到元素的自然样式，视觉上一模一样，但没有残留。
+ */
+@keyframes swap-in {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    translate: none;
+    filter: none;
+  }
+}
+
+.swap-in {
+  animation: swap-in 480ms var(--ease-inout) backwards;
 }
 
 /*

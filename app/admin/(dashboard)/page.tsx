@@ -18,7 +18,7 @@ import { listMoments } from "@/lib/content/moments";
 import { listProjects } from "@/lib/content/projects";
 import { listAlbums } from "@/lib/content/albums";
 import { listFriends } from "@/lib/content/friends";
-import { getMusicConfig } from "@/lib/content/music";
+import { countTracks, getMusicConfig } from "@/lib/content/music";
 import { listAllComments } from "@/lib/content/comments";
 import { getSettings } from "@/lib/content/settings";
 
@@ -395,7 +395,7 @@ export default async function AdminDashboard({
               { label: "项目", value: projects.length, sub: "", href: "/admin/projects" },
               { label: "照片", value: photoCount, sub: `${albums.length} 本相册`, href: "/admin/photowall" },
               { label: "友链", value: friends.length, sub: "", href: "/admin/friends" },
-              { label: "歌曲", value: music.tracks.length, sub: music.apiUrl ? "已配音源" : "未配音源", href: "/admin/music" },
+              { label: "歌曲", value: countTracks(music), sub: `${music.playlists.length} 个歌单`, href: "/admin/music" },
               { label: "评论", value: comments.length, sub: pending.length ? `${pending.length} 待审` : "", href: "/admin/comments" },
             ].map((item) => (
               <li key={item.label}>

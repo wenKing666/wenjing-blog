@@ -33,8 +33,7 @@ export default async function SiteLayout({
      * 悬浮播放条则按需显示：一首歌都没有时它没有任何意义，不必占着屏幕一角。
      */
     <MusicProvider
-      tracks={music.tracks}
-      title={music.title}
+      playlists={music.playlists}
       source={music.source}
       hasApi={Boolean(music.apiUrl)}
     >

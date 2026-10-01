@@ -9,7 +9,7 @@ import { listMoments } from "@/lib/content/moments";
 import { listProjects } from "@/lib/content/projects";
 import { listAlbums } from "@/lib/content/albums";
 import { listFriends } from "@/lib/content/friends";
-import { getMusicConfig } from "@/lib/content/music";
+import { countTracks, getMusicConfig } from "@/lib/content/music";
 import { renderMarkdownCached } from "@/lib/markdown/cache";
 
 export const metadata: Metadata = {
@@ -89,7 +89,7 @@ export default async function AboutPage() {
     { href: "/projects", label: "项目", hint: "做过的东西", count: projects.length, unit: "个" },
     { href: "/photowall", label: "照片墙", hint: "按相册归置", count: photoCount, unit: "张" },
     { href: "/friends", label: "友链", hint: "常去的地方", count: friends.length, unit: "个" },
-    { href: "/music", label: "音乐", hint: "常听的歌", count: music.tracks.length, unit: "首" },
+    { href: "/music", label: "音乐", hint: "常听的歌", count: countTracks(music), unit: "首" },
   ];
 
   const latestMoment = moments[0];

@@ -9,20 +9,28 @@ export async function PUT(request: Request) {
   return mutateRoute(request, async () => {
     const body = await parseJsonBody<Record<string, unknown>>(request);
 
-    const tracks = Array.isArray(body.tracks) ? body.tracks : [];
+    const playlists = Array.isArray(body.playlists) ? body.playlists : [];
     const music = await saveMusicConfig({
       source: body.source === "custom" ? "custom" : "builtin",
       apiUrl: typeof body.apiUrl === "string" ? body.apiUrl : "",
-      title: typeof body.title === "string" ? body.title : "",
-      tracks: tracks.map((item) => {
+      playlists: playlists.map((item) => {
         const raw = (item ?? {}) as Record<string, unknown>;
+        const tracks = Array.isArray(raw.tracks) ? raw.tracks : [];
         return {
           id: typeof raw.id === "string" ? raw.id : "",
-          server: typeof raw.server === "string" ? raw.server : "netease",
           name: typeof raw.name === "string" ? raw.name : "",
-          artist: typeof raw.artist === "string" ? raw.artist : "",
-          directUrl: typeof raw.directUrl === "string" ? raw.directUrl : "",
-        } satisfies Track;
+          note: typeof raw.note === "string" ? raw.note : "",
+          tracks: tracks.map((track) => {
+            const row = (track ?? {}) as Record<string, unknown>;
+            return {
+              id: typeof row.id === "string" ? row.id : "",
+              server: typeof row.server === "string" ? row.server : "netease",
+              name: typeof row.name === "string" ? row.name : "",
+              artist: typeof row.artist === "string" ? row.artist : "",
+              directUrl: typeof row.directUrl === "string" ? row.directUrl : "",
+            } satisfies Track;
+          }),
+        };
       }),
     });
 

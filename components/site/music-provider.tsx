@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { MusicSource, Track } from "@/lib/content/music";
+import type { MusicSource, Playlist, Track } from "@/lib/content/music";
 import { extractSongId, looksLikePageUrl } from "@/lib/music/track-id";
 
 /**
@@ -31,7 +31,17 @@ export type TrackMeta = {
 };
 
 type MusicContextValue = {
+  /** 全部歌单。前台的左右切换认这个 */
+  playlists: Playlist[];
+  /** 当前是第几个歌单（`playlists` 的下标） */
+  playlistIndex: number;
+  /** 切歌单。越界或跟当前是同一个都会被忽略 */
+  selectPlaylist: (index: number) => void;
+  /** 按 ±1 前后翻歌单，末尾绕回开头。只有一个歌单时什么都不做 */
+  cyclePlaylist: (delta: number) => void;
+  /** **当前歌单**的曲目 */
   tracks: Track[];
+  /** **当前歌单**的名字 */
   title: string;
   /** 抓回来的歌曲信息。界面上优先用它，配置文件里填的作为兜底 */
   meta: Record<string, TrackMeta>;
@@ -256,20 +266,25 @@ function ensureGraph(audio: HTMLAudioElement, src: string): void {
 }
 
 export function MusicProvider({
-  tracks,
-  title,
+  playlists,
   source,
   hasApi,
   children,
 }: {
-  tracks: Track[];
-  title: string;
+  playlists: Playlist[];
   source: MusicSource;
   /** 自定义模式下是否配了解析接口 */
   hasApi: boolean;
   children: React.ReactNode;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  /**
+   * 当前歌单的主键。
+   *
+   * 存主键而不是下标：后台调整歌单顺序之后，同一个下标会指向另一个歌单，
+   * 主键不会。找不到（比如后台把它删了）就退回第一个。
+   */
+  const [playlistId, setPlaylistId] = useState(playlists[0]?.id ?? "");
   const [meta, setMeta] = useState<Record<string, TrackMeta>>({});
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [playing, setPlaying] = useState(false);
@@ -278,6 +293,24 @@ export function MusicProvider({
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(0.8);
+
+  /*
+   * 当前歌单派生出来的三个值。
+   *
+   * 必须用 useMemo 稳住引用 —— 下面那个播放 effect 把 `tracks` 放进了依赖数组，
+   * 每次渲染都造一个新数组的话它会反复执行、每首歌被 play() 无数遍。
+   */
+  const playlistIndex = useMemo(() => {
+    const found = playlists.findIndex((item) => item.id === playlistId);
+    return found >= 0 ? found : 0;
+  }, [playlists, playlistId]);
+
+  const tracks = useMemo(
+    () => playlists[playlistIndex]?.tracks ?? [],
+    [playlists, playlistIndex],
+  );
+
+  const title = playlists[playlistIndex]?.name ?? "歌单";
 
   /*
    * 音量记在本地：每次进来都要重调一遍很烦。
@@ -397,6 +430,52 @@ export function MusicProvider({
       cancelAnimationFrame(frame);
     };
   }, [currentIndex, tracks, source, hasApi]);
+
+  /**
+   * 切歌单。
+   *
+   * 切的时候要**把正在放的停下来**：新歌单的曲目和旧的完全不是一回事，
+   * `currentIndex` 那个下标更是指向了别的歌。不停的话会看到"右栏已经是歌单 B，
+   * 播放条还写着歌单 A 的歌"，而且那个下标在 B 里可能压根不存在。
+   * 所以连 audio 的 src 一起清掉，回到干净的待播状态，让人自己点第一首。
+   */
+  const selectPlaylist = useCallback(
+    (index: number) => {
+      const target = playlists[index];
+      if (!target || target.id === playlistId) return;
+
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
+      setPlaying(false);
+      setError(null);
+      setLoading(false);
+      setProgress(0);
+      setDuration(0);
+      setCurrentIndex(-1);
+      setPlaylistId(target.id);
+    },
+    [playlists, playlistId],
+  );
+
+  /**
+   * 左右翻歌单，环绕着走（最后一个的下一手就是第一个）。
+   * 只有两个歌单时也不用判断边界，`+ count` 把负数掰回正数区。
+   *
+   * 放在 Provider 里而不是各写一份：舞台和右下角播放器都要用，
+   * 两边的环绕算法要是哪天改得不一致，就会出现"一处能绕回去、一处卡在头尾"。
+   */
+  const cyclePlaylist = useCallback(
+    (delta: number) => {
+      const count = playlists.length;
+      if (count < 2) return;
+      selectPlaylist((playlistIndex + delta + count) % count);
+    },
+    [playlists.length, playlistIndex, selectPlaylist],
+  );
 
   const toggle = useCallback(() => {
     const audio = audioRef.current;
@@ -540,6 +619,10 @@ export function MusicProvider({
 
   const value = useMemo<MusicContextValue>(
     () => ({
+      playlists,
+      playlistIndex,
+      selectPlaylist,
+      cyclePlaylist,
       tracks,
       title,
       meta,
@@ -560,6 +643,7 @@ export function MusicProvider({
       getAnalyser,
     }),
     [
+      playlists, playlistIndex, selectPlaylist, cyclePlaylist,
       tracks, title, meta, infoOf, currentIndex, playing, loading, error,
       progress, duration, volume, playAt, toggle, next, prev, seek, setVolume,
       getAnalyser,

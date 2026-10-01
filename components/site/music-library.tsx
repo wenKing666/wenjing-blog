@@ -111,6 +111,44 @@ export function MusicLibrary() {
   );
 }
 
+/**
+ * 歌单切换（「音乐」页那一排）。
+ *
+ * 只在**真的有多个歌单**时才渲染 —— 只有一个歌单的"切换器"没有任何可切的东西，
+ * 白白占一行，还让人以为漏了什么。
+ */
+export function PlaylistTabs() {
+  const music = useMusic();
+
+  if (music.playlists.length < 2) return null;
+
+  return (
+    <div className="mt-8 flex flex-wrap gap-2">
+      {music.playlists.map((list, index) => {
+        const active = index === music.playlistIndex;
+        return (
+          <button
+            key={list.id}
+            type="button"
+            onClick={() => music.selectPlaylist(index)}
+            aria-pressed={active}
+            className={`inline-flex items-center gap-1.5 rounded-tile border px-3 py-1.5 font-sans text-sm font-semibold transition-colors ${
+              active
+                ? "border-jade bg-jade text-white"
+                : "border-ink/15 text-ink-soft hover:border-jade/40 hover:text-jade dark:border-white/15 dark:text-slate-300 dark:hover:text-jade-pale"
+            }`}
+          >
+            {list.name}
+            <span className="tnum font-mono text-[0.6875rem] opacity-60">
+              {list.tracks.length}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** 页面顶部的提示条：音源没配好时给出可操作的指引，而不是让用户对着列表干瞪眼。 */
 export function MusicNotice({ hasApi }: { hasApi: boolean }) {
   const music = useMusic();

@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { createPortal } from "react-dom";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   ListMusic,
   Loader2,
   Pause,
@@ -196,6 +198,17 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
     };
   }, []);
 
+  /*
+   * 当前歌单的主键，拿来当 React 的 key。
+   * 切歌单时整块内容会被重挂载一次，`swap-in` 那段动画就从头播 ——
+   * 这是重放 CSS 动画最省事也最可靠的做法（不用自己管计时器和状态机）。
+   *
+   * 用主键而不是下标：后台调过顺序之后，下标指向的会是别的歌单。
+   * 前面三栏共用一个 key 值，所以各自加了自己的前缀。
+   */
+  const playlistKey =
+    music.playlists[music.playlistIndex]?.id ?? String(music.playlistIndex);
+
   const track = music.currentIndex >= 0 ? music.tracks[music.currentIndex] : null;
   const info = track ? music.infoOf(track) : null;
   const cover = info?.cover ?? "";
@@ -258,9 +271,29 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
    */
   useEffect(() => {
     const list = lyricsRef.current;
-    const line = activeLineRef.current;
     const viewport = lyricsViewportRef.current;
-    if (!list || !line || !viewport) return;
+    if (!list || !viewport) return;
+
+    const line = activeLineRef.current;
+
+    /*
+     * 没有"当前行"可居中：刚进页面、或切了歌单还没选曲的时候。
+     * 把位移清零，并把"已定位过"的标记撤掉 —— 下次选曲重新按首次定位处理，
+     * 直接对位，不从原点滑过去。
+     *
+     * 切歌单换的是整批歌词，旧的 transform 停在上一批的位置上，
+     * 不撤标记的话点第一首会先从一个毫不相干的地方滑一下，很怪。
+     * 同步关掉过渡，免得看到它自己滑回原点。
+     */
+    if (!line) {
+      positionedRef.current = false;
+      list.style.transition = "none";
+      list.style.transform = "translate3d(0, 0, 0)";
+      requestAnimationFrame(() => {
+        list.style.transition = "";
+      });
+      return;
+    }
 
     const offset = line.offsetTop + line.offsetHeight / 2 - viewport.clientHeight / 2;
     list.style.transform = `translate3d(0, ${-offset}px, 0)`;
@@ -517,7 +550,12 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
   const active = accent || FALLBACK_ACCENT;
 
   // 歌单是空的就什么都不画（正常情况父级已经拦住了，这里是双保险）
-  if (music.tracks.length === 0) return null;
+  /*
+   * 判空要看**所有歌单**，不是当前这个。
+   * 原来写的是 music.tracks.length —— 那只是当前歌单；有多个歌单时，
+   * 只要切到一个空歌单，整个舞台会连人带界面一起消失，而且没有回退的路。
+   */
+  if (music.playlists.length === 0) return null;
   // Portal 需要 document，服务端渲染时先不渲染
   if (!isClient) return null;
 
@@ -623,7 +661,11 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
           这样整块是往画面里侧倒下去，而不是绕中心左右对称地扭 ——
           后者会让面板一半凸出来、一半凹进去，看着像歪了。
         */}
-        <div className="relative h-[46vh] lg:h-[62vh] lg:[transform:rotateY(18deg)] lg:[transform-origin:left_center]">
+        {/* key 换掉 → 整块重挂载 → swap-in 重播。切歌单时歌词栏也要跟着换气 */}
+        <div
+          key={`lyric-${playlistKey}`}
+          className="swap-in relative h-[46vh] lg:h-[62vh] lg:[transform:rotateY(18deg)] lg:[transform-origin:left_center]"
+        >
           {/* 细时间轴。上下两端淡出，不要齐刷刷断掉 */}
           <span
             aria-hidden="true"
@@ -697,7 +739,10 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
         }`}
       >
         {/* 右栏同样往画面里侧倒，方向相反，两栏才对称地"夹"住中间 */}
-        <div className="lg:[transform:rotateY(-18deg)] lg:[transform-origin:right_center]">
+        <div
+          key={`list-${playlistKey}`}
+          className="swap-in lg:[transform:rotateY(-18deg)] lg:[transform-origin:right_center]"
+        >
         <header className="flex items-baseline justify-end gap-3">
           <span className="font-mono text-[0.6875rem] tracking-[0.22em] text-white/35 uppercase">
             Playlist
@@ -706,9 +751,44 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
             {music.tracks.length}
           </span>
         </header>
-        <h2 className="mt-1 text-right text-xl font-bold tracking-tight text-white">
-          {music.title}
-        </h2>
+        {/*
+          歌单切换条。
+          只有一个歌单时只留标题，箭头和计数都不出现 —— 没得切的东西摆在那儿，
+          反而让人以为点得动。
+        */}
+        <div className="mt-1 flex items-center justify-end gap-2.5">
+          <h2 className="min-w-0 truncate text-right text-xl font-bold tracking-tight text-white">
+            {music.title}
+          </h2>
+
+          {music.playlists.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={() => music.cyclePlaylist(-1)}
+                aria-label="上一个歌单"
+                title="上一个歌单"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/15 text-white/55 transition-colors hover:border-white/35 hover:text-white"
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              </button>
+
+              <span className="tnum shrink-0 font-mono text-[0.6875rem] text-white/40">
+                {music.playlistIndex + 1}/{music.playlists.length}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => music.cyclePlaylist(1)}
+                aria-label="下一个歌单"
+                title="下一个歌单"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/15 text-white/55 transition-colors hover:border-white/35 hover:text-white"
+              >
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </>
+          )}
+        </div>
 
         {/* relative 是给每行的 offsetTop 用的：让它以列表内容原点为基准量，
             而不是以某个不确定的定位祖先为基准 */}
@@ -811,7 +891,10 @@ export function MusicStage({ siteTitle }: { siteTitle: string }) {
           </p>
         )}
 
-        <div className="pointer-events-auto w-full max-w-[600px] rounded-3xl border border-white/8 bg-white/[0.045] px-5 py-4 backdrop-blur-2xl">
+        <div
+          key={`card-${playlistKey}`}
+          className="swap-in pointer-events-auto w-full max-w-[600px] rounded-3xl border border-white/8 bg-white/[0.045] px-5 py-4 backdrop-blur-2xl"
+        >
           {/* 进度 */}
           <div className="flex items-center gap-3">
             <span className="tnum w-10 shrink-0 text-right font-mono text-[0.6875rem] text-white/45">

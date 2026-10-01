@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { getMusicConfig, isMusicPlayable } from "@/lib/content/music";
-import { MusicLibrary, MusicNotice } from "@/components/site/music-library";
+import { countTracks, getMusicConfig, isMusicPlayable } from "@/lib/content/music";
+import { MusicLibrary, MusicNotice, PlaylistTabs } from "@/components/site/music-library";
 import { getSettingsOnce } from "@/lib/content/settings";
 import { MusicStage } from "@/components/site/music-stage";
 
@@ -41,15 +41,18 @@ export default async function MusicPage() {
           <span>Music</span>
         </p>
         <h1 className="display mt-5 text-4xl text-ink sm:text-5xl dark:text-white">
-          {config.title}
+          {/* 多个歌单时标题用「音乐」—— 否则它会和下面第一个歌单的标签重名 */}
+          {config.playlists.length > 1 ? "音乐" : (config.playlists[0]?.name ?? "歌单")}
         </h1>
         <p className="mt-4 font-mono text-xs tracking-wider text-ink-faint dark:text-slate-500">
-          {config.tracks.length} 首
+          {countTracks(config)} 首
+          {config.playlists.length > 1 ? ` · ${config.playlists.length} 个歌单` : ""}
           {isMusicPlayable(config) ? " · 点任意一列播放" : " · 尚未配置音源"}
         </p>
       </header>
 
       <MusicNotice hasApi={hasApi} />
+      <PlaylistTabs />
       <MusicLibrary />
     </div>
   );

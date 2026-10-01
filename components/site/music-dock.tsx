@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
+  ChevronLeft,
+  ChevronRight,
   ListMusic,
   Loader2,
   Music,
@@ -70,6 +72,14 @@ export function MusicDock() {
   const info = current ? music.infoOf(current) : null;
   const cover = info?.cover ?? "";
 
+  /*
+   * 当前歌单的主键，拿来当 key —— 切歌单时让曲目信息区和歌单面板重新入场一次
+   * （动画规则见 globals.css 的 .swap-in）。
+   * 用主键而不是下标：后台调过顺序之后，下标指向的就是别的歌单了。
+   */
+  const playlistKey =
+    music.playlists[music.playlistIndex]?.id ?? String(music.playlistIndex);
+
   // 挂载前不渲染，避免服务端与客户端对"展开状态"的判断不一致
   if (!mounted) return null;
 
@@ -77,7 +87,10 @@ export function MusicDock() {
     <div className="fixed right-4 bottom-4 z-[150] flex flex-col items-end gap-2 sm:right-6 sm:bottom-6">
       {/* 歌单面板 */}
       {open && showList && (
-        <div className="glass-xl max-h-[60vh] w-[19rem] overflow-y-auto p-3">
+        <div
+          key={`list-${playlistKey}`}
+          className="swap-in glass-xl max-h-[60vh] w-[19rem] overflow-y-auto p-3"
+        >
           <div className="flex items-center justify-between px-2 py-1">
             <span className="rule-label flex-1">
               <span>{music.title}</span>
@@ -127,7 +140,7 @@ export function MusicDock() {
       >
         {open ? (
           <div>
-            <div className="flex items-center gap-3">
+            <div key={`head-${playlistKey}`} className="swap-in flex items-center gap-3">
               {cover ? (
                 // eslint-disable-next-line @next/next/no-img-element -- 封面来自解析接口，无需图片优化器
                 <img
@@ -151,7 +164,10 @@ export function MusicDock() {
                   {info?.name || "选一首歌开始"}
                 </p>
                 <p className="mt-0.5 truncate font-sans text-xs text-ink-faint dark:text-slate-500">
-                  {info?.artist || music.title}
+                  {info?.artist ||
+                    (music.playlists.length > 1
+                      ? `${music.tracks.length} 首`
+                      : music.title)}
                 </p>
               </div>
 
@@ -164,6 +180,42 @@ export function MusicDock() {
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
+
+            {/*
+              歌单切换。只有一个歌单时整行不渲染 —— 没得切的东西摆在那儿，
+              反而让人以为点得动（和 3D 舞台那边同一条判断）。
+              切换的实现在 Provider 里，舞台和这里共用一份环绕算法。
+            */}
+            {music.playlists.length > 1 && (
+              <div className="mt-2.5 flex items-center gap-1 rounded-tile bg-ink/[0.045] p-0.5 dark:bg-white/[0.055]">
+                <button
+                  type="button"
+                  onClick={() => music.cyclePlaylist(-1)}
+                  aria-label="上一个歌单"
+                  title="上一个歌单"
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-ink/5 hover:text-ink dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+
+                <span className="min-w-0 flex-1 truncate text-center font-sans text-xs text-ink-soft dark:text-slate-300">
+                  {music.title}
+                  <span className="tnum ml-1.5 text-ink-faint dark:text-slate-500">
+                    {music.playlistIndex + 1}/{music.playlists.length}
+                  </span>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => music.cyclePlaylist(1)}
+                  aria-label="下一个歌单"
+                  title="下一个歌单"
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-ink/5 hover:text-ink dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            )}
 
             {/* 进度条：点击跳转 */}
             <div className="mt-3 flex items-center gap-2">

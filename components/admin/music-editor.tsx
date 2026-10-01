@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
+  Disc3,
   GripVertical,
   Loader2,
   Plus,
@@ -24,14 +25,24 @@ import {
   Section,
   type SaveMessage,
 } from "./ui";
-import type { MusicConfig, Track } from "@/lib/content/music";
+import type { MusicConfig, Playlist, Track } from "@/lib/content/music";
+/*
+ * 常量与发号器从 music/playlist-id 引，**不能**从 content/music 引 ——
+ * 后者背后有一整条 node:fs 依赖链（见下面 import type 那段注释），
+ * 而这里是个客户端组件。值和常量不像类型那样能被编译期抹掉。
+ */
+import {
+  createPlaylistId,
+  LEGACY_PLAYLIST_ID,
+  LEGACY_PLAYLIST_NAME,
+} from "@/lib/music/playlist-id";
 import { formatTime } from "@/lib/format-time";
 /*
  * 只引类型。`import type` 会在编译期被完全抹掉，不会把 netease.ts 里的
  * 请求逻辑打进浏览器包 —— 那个文件是服务端专用的（同样的原因，
  * track-id.ts 才被单独拆了出去）。
  */
-import type { NeteaseSearchHit } from "@/lib/music/netease";
+import type { NeteaseAlbumHit, NeteaseSearchHit } from "@/lib/music/netease";
 
 /** 解析接口通常支持这些平台，写成下拉省得用户手打错。 */
 const SERVERS = [
@@ -88,8 +99,18 @@ function feeBadge(fee: number): { text: string; className: string } | null {
  */
 type TrackRow = Track & { rowId: string };
 
-/** 组件内部的配置形态。存盘前要经过 toSaved 剥掉 rowId。 */
-type EditorConfig = Omit<MusicConfig, "tracks"> & { tracks: TrackRow[] };
+/**
+ * 组件内部的歌单形态：曲目带上本地行标识。
+ * 存盘前要经过 toSaved 剥掉 rowId。
+ */
+type EditorPlaylist = Omit<Playlist, "tracks"> & { tracks: TrackRow[] };
+
+/** 组件内部的配置形态。 */
+type EditorConfig = {
+  source: MusicConfig["source"];
+  apiUrl: string;
+  playlists: EditorPlaylist[];
+};
 
 /**
  * 脏检查用的序列化。
@@ -98,67 +119,127 @@ type EditorConfig = Omit<MusicConfig, "tracks"> & { tracks: TrackRow[] };
  *   表单一进来就顶着「未保存」。
  *
  * ★ 每首曲目序列化成**数组**而不是对象：对象的键序不同，字符串就不同，
- *   「未保存」会永远亮着。原来那句 JSON.stringify(config) !== snapshot
- *   其实已经悄悄依赖两边的键序完全一致了，这里顺手把这个隐患去掉。
- *   语义没变：字段值一样就等于没改。
+ *   「未保存」会永远亮着。歌单名和备注也一并进指纹，
+ *   光改个歌单名同样得让人看见"未保存"。
  */
 function serialize(config: {
   source: MusicConfig["source"];
   apiUrl: string;
-  title: string;
-  tracks: readonly Track[];
+  playlists: readonly {
+    id: string;
+    name: string;
+    note: string;
+    tracks: readonly Track[];
+  }[];
 }): string {
   return JSON.stringify({
     source: config.source,
     apiUrl: config.apiUrl,
-    title: config.title,
-    tracks: config.tracks.map((track) => [
-      track.id,
-      track.server,
-      track.name,
-      track.artist,
-      track.directUrl,
+    playlists: config.playlists.map((list) => [
+      list.id,
+      list.name,
+      list.note,
+      list.tracks.map((track) => [
+        track.id,
+        track.server,
+        track.name,
+        track.artist,
+        track.directUrl,
+      ]),
     ]),
   });
 }
 
-/** 送去 PUT 的请求体。形状和以前 JSON.stringify(config) 一字不差 —— rowId 绝不能进配置文件。 */
+/** 送去 PUT 的请求体。rowId 绝不能进配置文件。 */
 function toSaved(config: EditorConfig): MusicConfig {
   return {
     source: config.source,
     apiUrl: config.apiUrl,
-    title: config.title,
-    tracks: config.tracks.map(({ id, server, name, artist, directUrl }) => ({
-      id,
-      server,
-      name,
-      artist,
-      directUrl,
+    playlists: config.playlists.map((list) => ({
+      id: list.id,
+      name: list.name,
+      note: list.note,
+      tracks: list.tracks.map(({ id, server, name, artist, directUrl }) => ({
+        id,
+        server,
+        name,
+        artist,
+        directUrl,
+      })),
     })),
   };
 }
 
 export function MusicEditor({ initial }: { initial: MusicConfig }) {
   const router = useRouter();
-  const [config, setConfig] = useState<EditorConfig>(() => ({
-    ...initial,
-    tracks: initial.tracks.map((track, index) => ({
-      ...track,
-      rowId: `t${index}`,
-    })),
-  }));
+  const [config, setConfig] = useState<EditorConfig>(() => {
+    /*
+     * 一个歌单都没有时**先摆一个空的**。
+     *
+     * 不是偷懒：整套编辑界面（曲目列表、拖拽、搜索加歌）都是围绕"当前歌单"
+     * 写的，没有当前歌单就得让每一处都处理"可能不存在"，白白多出一堆分支。
+     * 摆一个空的，界面各处照常工作，用户往里加的第一首歌就是它的内容。
+     *
+     * 主键用固定的 default 而不是随机值：这个初始化函数服务端和客户端
+     * 各跑一次，随机会在两边得到不同的 id。
+     */
+    const playlists =
+      initial.playlists.length > 0
+        ? initial.playlists
+        : [
+            {
+              id: LEGACY_PLAYLIST_ID,
+              name: LEGACY_PLAYLIST_NAME,
+              note: "",
+              tracks: [],
+            },
+          ];
+
+    return {
+      source: initial.source,
+      apiUrl: initial.apiUrl,
+      playlists: playlists.map((list) => ({
+        ...list,
+        tracks: list.tracks.map((track, index) => ({
+          ...track,
+          rowId: `t${index}`,
+        })),
+      })),
+    };
+  });
   const [snapshot, setSnapshot] = useState(() => serialize(initial));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<SaveMessage>(null);
 
+  /** 当前编辑的是哪个歌单（主键）。存主键不存下标 —— 删掉一个歌单之后下标的含义会整体前移 */
+  const [activeId, setActiveId] = useState(
+    () => initial.playlists[0]?.id ?? LEGACY_PLAYLIST_ID,
+  );
+
+  /** 当前歌单。主键找不到（比如刚被删掉）就退到第一个 */
+  const active =
+    config.playlists.find((list) => list.id === activeId) ?? config.playlists[0];
+
+  /** 改**当前歌单**。曲目的增删改全都从这儿走 */
+  function setActive(patch: (list: EditorPlaylist) => EditorPlaylist) {
+    setConfig((previous) => ({
+      ...previous,
+      playlists: previous.playlists.map((list) =>
+        list.id === active.id ? patch(list) : list,
+      ),
+    }));
+  }
+
   /**
-   * 行标识发号器。初值取初始曲目数，免得和已经发出去的 t0..t(n-1) 撞上。
+   * 行标识发号器。初值取初始曲目总数，免得和已经发出去的 t0..t(n-1) 撞上。
    *
    * 用递增序号而不是 crypto.randomUUID()：这个组件会被服务端预渲染一遍，
    * 随机会在两边各算一次。key 不进 DOM、不会报水合不一致，但"两边算出不同的
    * 东西"这件事本身就该避免。
    */
-  const rowSeqRef = useRef(initial.tracks.length);
+  const rowSeqRef = useRef(
+    initial.playlists.reduce((sum, list) => sum + list.tracks.length, 0),
+  );
   const nextRowId = () => `t${rowSeqRef.current++}`;
 
   /** 展开了哪几行 */
@@ -175,6 +256,13 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
   const [searching, setSearching] = useState(false);
   /** null = 还没搜过，结果区不渲染 */
   const [results, setResults] = useState<NeteaseSearchHit[] | null>(null);
+  /** 搜的是单曲还是专辑 */
+  const [searchKind, setSearchKind] = useState<"song" | "album">("song");
+  /** 专辑结果。和 results 分开存：两种结果形状不同，合起来到处都得窄化 */
+  const [albumResults, setAlbumResults] = useState<NeteaseAlbumHit[] | null>(null);
+  /** 正在取曲目的那张专辑。非空时所有"加为歌单"都禁用，防连点建出一堆重复歌单 */
+  const [albumBusy, setAlbumBusy] = useState<string | null>(null);
+  const [albumNote, setAlbumNote] = useState<string | null>(null);
   /** 搜出当前这批结果时用的关键词，只用于"没搜到 xxx"那句提示 */
   const [searchedFor, setSearchedFor] = useState("");
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -186,11 +274,11 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
    * 用 size 判断会虚高，按钮文字就错了。
    */
   const allOpen =
-    config.tracks.length > 0 &&
-    config.tracks.every((track) => openRows.has(track.rowId));
+    active.tracks.length > 0 &&
+    active.tracks.every((track) => openRows.has(track.rowId));
 
   /** 有 ID 的曲目才值得抓。 */
-  const ids = config.tracks
+  const ids = active.tracks
     .map((track) => track.id.trim())
     .filter((id) => /^\d{1,20}$/.test(id));
   const hasFetchableIds = ids.length > 0;
@@ -221,9 +309,9 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
       let filled = 0;
       const failures: string[] = [];
 
-      setConfig((previous) => ({
-        ...previous,
-        tracks: previous.tracks.map((track) => {
+      setActive((list) => ({
+        ...list,
+        tracks: list.tracks.map((track) => {
           if (!track.directUrl && !track.id) return track;
           const song = byId.get(track.id.trim());
           if (!song) return track;
@@ -260,36 +348,113 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
     }
   }
 
-  /** 搜歌。浏览器只跟自己的后台说话，由服务端去问网易云。 */
+  /** 搜歌或搜专辑。浏览器只跟自己的后台说话，由服务端去问网易云。 */
   async function runSearch() {
     const keyword = query.trim();
     if (!keyword || searching) return;
 
     setSearching(true);
     setSearchError(null);
+    setAlbumNote(null);
 
     try {
       const response = await fetch(
-        `/api/admin/music/search?q=${encodeURIComponent(keyword)}`,
+        `/api/admin/music/search?q=${encodeURIComponent(keyword)}${
+          searchKind === "album" ? "&type=album" : ""
+        }`,
       );
       const data = (await response.json().catch(() => ({}))) as {
         songs?: NeteaseSearchHit[];
+        albums?: NeteaseAlbumHit[];
         error?: string;
       };
 
-      if (!response.ok || !data.songs) {
+      /*
+       * 按当前这一档取结果。不能只看 response.ok ——
+       * 出错时两条列表都是 undefined，当成失败处理。
+       */
+      const hits = searchKind === "album" ? data.albums : data.songs;
+      if (!response.ok || !hits) {
         setSearchError(data.error ?? `搜索失败（HTTP ${response.status}）`);
         setResults(null);
+        setAlbumResults(null);
         return;
       }
 
-      setResults(data.songs);
+      if (searchKind === "album") {
+        setAlbumResults(data.albums ?? []);
+        setResults(null);
+      } else {
+        setResults(data.songs ?? []);
+        setAlbumResults(null);
+      }
       setSearchedFor(keyword);
     } catch {
       setSearchError("无法连接服务器。");
       setResults(null);
+      setAlbumResults(null);
     } finally {
       setSearching(false);
+    }
+  }
+
+  /**
+   * 把一张专辑整张存成一个新歌单。
+   *
+   * 曲目一次性从服务端拿回来（见 /api/admin/music/album），不用一首首抓 ——
+   * 专辑详情本来就是成批给的。建好之后**直接切过去**，人马上能看见结果。
+   */
+  async function importAlbum(hit: NeteaseAlbumHit) {
+    if (albumBusy) return;
+    setAlbumBusy(hit.id);
+    setAlbumNote(null);
+
+    try {
+      const response = await fetch(
+        `/api/admin/music/album?id=${encodeURIComponent(hit.id)}`,
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        album?: { name: string; artist: string; tracks: NeteaseSearchHit[] };
+        error?: string;
+      };
+
+      if (!response.ok || !data.album) {
+        setAlbumNote(data.error ?? `取专辑失败（HTTP ${response.status}）`);
+        return;
+      }
+
+      const album = data.album;
+      const id = createPlaylistId();
+      /* 行标识在更新函数**外面**发，理由见 addHit 里那段 */
+      const rows = album.tracks.map((track) => ({
+        rowId: nextRowId(),
+        id: track.id,
+        server: "netease",
+        name: track.name,
+        artist: track.artist,
+        directUrl: "",
+      }));
+
+      setConfig((previous) => ({
+        ...previous,
+        playlists: [
+          ...previous.playlists,
+          {
+            id,
+            name: album.name || hit.name || "新歌单",
+            note: album.artist ? `专辑 · ${album.artist}` : "专辑导入",
+            tracks: rows,
+          },
+        ],
+      }));
+      setActiveId(id);
+      setAlbumNote(
+        `已把「${album.name || hit.name}」存成新歌单，共 ${rows.length} 首。记得点保存。`,
+      );
+    } catch {
+      setAlbumNote("无法连接服务器。");
+    } finally {
+      setAlbumBusy(null);
     }
   }
 
@@ -314,13 +479,13 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
      * 连加十首就自动展开十行的话，折叠本身也就白做了。
      * 反馈交给行尾那个会变成「已在歌单」的按钮。
      */
-    setConfig((previous) =>
-      previous.tracks.some((track) => track.id.trim() === hit.id)
-        ? previous
+    setActive((list) =>
+      list.tracks.some((track) => track.id.trim() === hit.id)
+        ? list
         : {
-            ...previous,
+            ...list,
             tracks: [
-              ...previous.tracks,
+              ...list.tracks,
               {
                 rowId,
                 id: hit.id,
@@ -354,7 +519,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
    */
   function toggleAllRows() {
     setOpenRows(
-      allOpen ? new Set() : new Set(config.tracks.map((track) => track.rowId)),
+      allOpen ? new Set() : new Set(active.tracks.map((track) => track.rowId)),
     );
   }
 
@@ -365,19 +530,19 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
    * 代价只是一个 Set 条目；要清就得再穿一次状态更新进删除流程，不划算。
    */
   function removeTrack(index: number) {
-    setConfig((previous) => ({
-      ...previous,
-      tracks: previous.tracks.filter((_, i) => i !== index),
+    setActive((list) => ({
+      ...list,
+      tracks: list.tracks.filter((_, i) => i !== index),
     }));
   }
 
   /** 新增一个空行，并**自动展开** —— 它是空的，下一步就是往里填 ID。 */
   function addEmptyTrack() {
     const rowId = nextRowId();
-    setConfig((previous) => ({
-      ...previous,
+    setActive((list) => ({
+      ...list,
       tracks: [
-        ...previous.tracks,
+        ...list.tracks,
         { rowId, id: "", server: "netease", name: "", artist: "", directUrl: "" },
       ],
     }));
@@ -391,38 +556,72 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
    * 指示线画在行的上沿，两端都用插入位表示就不会出现经典的差一位错误。
    */
   function dropTrack(from: number, to: number) {
-    setConfig((previous) => {
-      if (from < 0 || from >= previous.tracks.length) return previous;
+    setActive((list) => {
+      if (from < 0 || from >= list.tracks.length) return list;
 
       const target = to > from ? to - 1 : to;
       // 原地放下：连重渲染都不必，也不会平白把表单弄脏
-      if (target === from) return previous;
+      if (target === from) return list;
 
-      const next = [...previous.tracks];
+      const next = [...list.tracks];
       const [moved] = next.splice(from, 1);
       next.splice(target, 0, moved);
       // 整个对象搬移，rowId 自动跟着走 —— 这就是把它挂在对象上的回报
-      return { ...previous, tracks: next };
+      return { ...list, tracks: next };
     });
   }
 
   function updateTrack(index: number, patch: Partial<Track>) {
-    setConfig((previous) => ({
-      ...previous,
-      tracks: previous.tracks.map((track, i) =>
+    setActive((list) => ({
+      ...list,
+      tracks: list.tracks.map((track, i) =>
         i === index ? { ...track, ...patch } : track,
       ),
     }));
   }
 
   function moveTrack(index: number, delta: number) {
-    setConfig((previous) => {
-      const next = [...previous.tracks];
+    setActive((list) => {
+      const next = [...list.tracks];
       const target = index + delta;
-      if (target < 0 || target >= next.length) return previous;
+      if (target < 0 || target >= next.length) return list;
       [next[index], next[target]] = [next[target], next[index]];
-      return { ...previous, tracks: next };
+      return { ...list, tracks: next };
     });
+  }
+
+  /** 新建一个空歌单并切过去。主键在事件里发，不在渲染期算 */
+  function addPlaylist() {
+    const id = createPlaylistId();
+    setConfig((previous) => ({
+      ...previous,
+      playlists: [
+        ...previous.playlists,
+        {
+          id,
+          name: `歌单 ${previous.playlists.length + 1}`,
+          note: "",
+          tracks: [],
+        },
+      ],
+    }));
+    setActiveId(id);
+  }
+
+  /**
+   * 删掉当前歌单（连同里面的曲目）。
+   *
+   * 至少留一个 —— 一个不剩的话整个编辑器就没有"当前歌单"可编辑了。
+   * 按钮只在歌单数 > 1 时出现，这里的兜底是防手滑，不是为了走得到。
+   */
+  function removePlaylist() {
+    if (config.playlists.length <= 1) return;
+    const rest = config.playlists.filter((list) => list.id !== active.id);
+    setConfig((previous) => ({
+      ...previous,
+      playlists: previous.playlists.filter((list) => list.id !== active.id),
+    }));
+    setActiveId(rest[0]?.id ?? LEGACY_PLAYLIST_ID);
   }
 
   async function handleSave() {
@@ -449,16 +648,21 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
       // 先取成 const —— 收窄后的类型才能带进 setConfig 的回调里
       const saved = data.music;
       setConfig((previous) => ({
-        ...saved,
-        tracks: saved.tracks.map((track, index) => ({
-          ...track,
-          /*
-           * 服务端会丢掉"既没有 ID 又没有直链"的空行（见 lib/content/music.ts 的
-           * saveMusicConfig），回来的数组可能比发出去时短，所以不能直接切旧数组。
-           * 按位置沿用旧标识只是为了让已展开的行尽量别乱跳；真错位了也无所谓 ——
-           * 标识只需要唯一。为这个在客户端复刻一遍服务端的过滤规则不值得。
-           */
-          rowId: previous.tracks[index]?.rowId ?? nextRowId(),
+        source: saved.source,
+        apiUrl: saved.apiUrl,
+        playlists: saved.playlists.map((list, listIndex) => ({
+          ...list,
+          tracks: list.tracks.map((track, index) => ({
+            ...track,
+            /*
+             * 服务端会丢掉"既没有 ID 又没有直链"的空行（见 lib/content/music.ts 的
+             * saveMusicConfig），回来的数组可能比发出去时短，所以不能直接切旧数组。
+             * 按位置沿用旧标识只是为了让已展开的行尽量别乱跳；真错位了也无所谓 ——
+             * 标识只需要唯一。为这个在客户端复刻一遍服务端的过滤规则不值得。
+             */
+            rowId:
+              previous.playlists[listIndex]?.tracks[index]?.rowId ?? nextRowId(),
+          })),
         })),
       }));
       setSnapshot(serialize(saved));
@@ -551,20 +755,6 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
           </div>
         )}
 
-        <div>
-          <label htmlFor="musicTitle" className={labelClass}>
-            歌单标题
-          </label>
-          <input
-            id="musicTitle"
-            value={config.title}
-            onChange={(event) =>
-              setConfig((previous) => ({ ...previous, title: event.target.value }))
-            }
-            className={inputClass}
-          />
-        </div>
-
         <p className={hintClass}>
           无论是哪种方式，把音频放进
           <code className="mx-1 font-mono">content/uploads/</code>
@@ -573,9 +763,117 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
       </Section>
 
       <Section
-        title="从网易云搜索"
-        description="搜到点一下就能加进歌单，歌名和歌手自动填好 —— 不用再去网易云网页复制歌曲 ID。"
+        title="歌单"
+        description="可以放多个歌单，前台的右栏能左右切换。从专辑导入会自动建成一个新歌单。"
       >
+        <div className="flex flex-wrap items-center gap-2">
+          {config.playlists.map((list) => {
+            const selected = list.id === active.id;
+            return (
+              <button
+                key={list.id}
+                type="button"
+                onClick={() => setActiveId(list.id)}
+                aria-pressed={selected}
+                className={`inline-flex items-center gap-1.5 rounded-tile border px-3 py-1.5 font-sans text-sm font-semibold transition-colors ${
+                  selected
+                    ? "border-jade bg-jade text-white"
+                    : "border-ink/15 text-ink-soft hover:border-jade/40 hover:text-jade dark:border-white/15 dark:text-slate-300 dark:hover:text-jade-pale"
+                }`}
+              >
+                {list.name || "未命名"}
+                <span className="tnum font-mono text-[0.6875rem] opacity-60">
+                  {list.tracks.length}
+                </span>
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={addPlaylist}
+            className="inline-flex items-center gap-1.5 rounded-tile border border-dashed border-ink/20 px-3 py-1.5 font-sans text-sm font-semibold text-ink-soft transition-colors hover:border-jade/50 hover:text-jade dark:border-white/20 dark:text-slate-300"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            新建歌单
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="playlistName" className={labelClass}>
+              歌单名
+            </label>
+            <input
+              id="playlistName"
+              value={active.name}
+              onChange={(event) =>
+                setActive((list) => ({ ...list, name: event.target.value }))
+              }
+              className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="playlistNote" className={labelClass}>
+              备注（选填）
+            </label>
+            <input
+              id="playlistNote"
+              value={active.note}
+              onChange={(event) =>
+                setActive((list) => ({ ...list, note: event.target.value }))
+              }
+              placeholder="专辑 · 周杰伦"
+              className={inputClass}
+            />
+            <p className={hintClass}>只在后台显示，用来记住这个歌单是从哪儿来的。</p>
+          </div>
+        </div>
+
+        {config.playlists.length > 1 && (
+          <button
+            type="button"
+            onClick={removePlaylist}
+            className="inline-flex items-center gap-1.5 rounded-tile border border-red-500/30 px-3 py-1.5 font-sans text-sm font-semibold text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            删除当前歌单
+          </button>
+        )}
+      </Section>
+
+      <Section
+        title="从网易云搜索"
+        description="搜到点一下就能加进歌单。搜专辑还能把整张专辑一次存成一个新歌单。"
+      >
+        {/* 搜单曲还是搜专辑。两种结果长得不一样，所以分开渲染 */}
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              { key: "song", label: "单曲" },
+              { key: "album", label: "专辑" },
+            ] as const
+          ).map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => {
+                setSearchKind(option.key);
+                setSearchError(null);
+              }}
+              aria-pressed={searchKind === option.key}
+              className={`rounded-tile border px-3 py-1.5 font-sans text-sm font-semibold transition-colors ${
+                searchKind === option.key
+                  ? "border-jade bg-jade text-white"
+                  : "border-ink/15 text-ink-soft hover:border-jade/40 hover:text-jade dark:border-white/15 dark:text-slate-300 dark:hover:text-jade-pale"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -591,7 +889,9 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
               id="musicQuery"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="歌名、歌手、专辑都行"
+              placeholder={
+                searchKind === "album" ? "专辑名或歌手名" : "歌名、歌手、专辑都行"
+              }
               className={inputClass}
             />
           </div>
@@ -615,14 +915,28 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
           </p>
         )}
 
-        {results !== null && results.length === 0 && (
+        {albumNote && (
+          <p className="font-sans text-xs text-jade dark:text-jade-pale">
+            {albumNote}
+          </p>
+        )}
+
+        {searchKind === "song" && results !== null && results.length === 0 && (
           <p className={hintClass}>没搜到「{searchedFor}」，换个关键词试试。</p>
         )}
 
-        {results !== null && results.length > 0 && (
+        {searchKind === "album" &&
+          albumResults !== null &&
+          albumResults.length === 0 && (
+            <p className={hintClass}>
+              没搜到「{searchedFor}」这张专辑，换个关键词试试。
+            </p>
+          )}
+
+        {searchKind === "song" && results !== null && results.length > 0 && (
           <ul className="divide-y divide-ink/8 dark:divide-white/8">
             {results.map((hit) => {
-              const added = config.tracks.some(
+              const added = active.tracks.some(
                 (track) => track.id.trim() === hit.id,
               );
               const badge = feeBadge(hit.fee);
@@ -684,6 +998,63 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
           </ul>
         )}
 
+        {searchKind === "album" &&
+          albumResults !== null &&
+          albumResults.length > 0 && (
+            <ul className="divide-y divide-ink/8 dark:divide-white/8">
+              {albumResults.map((album) => {
+                const busy = albumBusy === album.id;
+                return (
+                  <li key={album.id} className="flex items-center gap-3 py-2">
+                    {album.cover ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- 后台缩略图，无需图片优化器
+                      <img
+                        src={album.cover}
+                        alt=""
+                        width={40}
+                        height={40}
+                        loading="lazy"
+                        className="h-10 w-10 shrink-0 rounded-tile bg-ink/5 object-cover dark:bg-white/5"
+                      />
+                    ) : (
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-tile bg-ink/5 text-ink-faint dark:bg-white/5 dark:text-slate-500">
+                        <Disc3 className="h-5 w-5" aria-hidden="true" />
+                      </span>
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-sans text-sm font-semibold">
+                        {album.name || "（无标题）"}
+                      </p>
+                      <p className="truncate font-sans text-xs text-ink-faint dark:text-slate-500">
+                        {[
+                          album.artist,
+                          album.size > 0 ? `${album.size} 首` : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "未知歌手"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void importAlbum(album)}
+                      disabled={busy || albumBusy !== null}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-tile border border-jade/30 bg-jade/10 px-3 py-1.5 font-sans text-xs font-semibold text-jade transition-colors hover:bg-jade/20 disabled:border-ink/10 disabled:bg-transparent disabled:text-ink-faint dark:text-jade-pale dark:disabled:text-slate-500"
+                    >
+                      {busy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                      )}
+                      {busy ? "取曲目中…" : "加为歌单"}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
         <p className={hintClass}>
           带 <span className="font-semibold">VIP</span> /{" "}
           <span className="font-semibold">付费专辑</span>{" "}
@@ -696,7 +1067,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
       </Section>
 
       <Section
-        title={`曲目（${config.tracks.length} 首）`}
+        title={`曲目（${active.tracks.length} 首）`}
         description="填平台歌曲 ID 即可，歌名和歌手留空也能播，但填上体验更好。拖动左侧把手调整顺序，点一行展开编辑。"
       >
         <ul
@@ -723,7 +1094,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
             setDropAt(null);
           }}
         >
-          {config.tracks.map((track, index) => {
+          {active.tracks.map((track, index) => {
             const open = openRows.has(track.rowId);
             const bodyId = `track-body-${track.rowId}`;
             /*
@@ -768,11 +1139,11 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
                     dropAt === index ? "opacity-100" : "opacity-0"
                   }`}
                 />
-                {index === config.tracks.length - 1 && (
+                {index === active.tracks.length - 1 && (
                   <span
                     aria-hidden="true"
                     className={`pointer-events-none absolute inset-x-1 -bottom-1.5 h-0.5 rounded-full bg-jade shadow-[0_0_8px_var(--color-jade)] transition-opacity duration-200 ease-[var(--ease-smooth)] dark:bg-jade-pale ${
-                      dropAt === config.tracks.length ? "opacity-100" : "opacity-0"
+                      dropAt === active.tracks.length ? "opacity-100" : "opacity-0"
                     }`}
                   />
                 )}
@@ -996,7 +1367,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
                         <button
                           type="button"
                           onClick={() => moveTrack(index, 1)}
-                          disabled={index === config.tracks.length - 1}
+                          disabled={index === active.tracks.length - 1}
                           title="下移"
                           className="inline-flex h-7 w-7 items-center justify-center rounded-tile text-ink-faint transition-colors hover:bg-ink/5 disabled:opacity-30 dark:text-slate-400 dark:hover:bg-white/5"
                         >
@@ -1029,7 +1400,7 @@ export function MusicEditor({ initial }: { initial: MusicConfig }) {
           <button
             type="button"
             onClick={toggleAllRows}
-            disabled={config.tracks.length === 0}
+            disabled={active.tracks.length === 0}
             className="inline-flex items-center gap-2 rounded-tile border border-ink/12 px-4 py-2 font-sans text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 disabled:opacity-50 dark:border-white/12 dark:text-slate-300 dark:hover:bg-white/5"
           >
             {allOpen ? (

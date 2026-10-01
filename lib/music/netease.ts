@@ -316,3 +316,162 @@ export async function searchNetease(
     ];
   });
 }
+
+/** 搜索结果里的一张专辑。字段按"够用来挑"选的，不含曲目列表 */
+export type NeteaseAlbumHit = {
+  id: string;
+  name: string;
+  artist: string;
+  /** 曲目数，接口给的 */
+  size: number;
+  /** 发行时间，毫秒时间戳。0 表示接口没给 */
+  publishTime: number;
+  /**
+   * 封面直链。
+   *
+   * 这里**能**拿到真正的 `picUrl` —— 专辑搜索对象和歌曲搜索对象字段不一样：
+   * 歌曲那边只有个超过 2^53 的 `picId`，JSON.parse 会抹坏它（见上面那段注释），
+   * 专辑这边直接给了拼好的地址。只在后台自己看，所以不绕代理。
+   */
+  cover: string;
+};
+
+/**
+ * 搜专辑。
+ *
+ * 和搜歌同一个接口，只把 `type` 换成 10。做这一条是为了**整张专辑存成一个歌单** ——
+ * 一张专辑的曲目本来就是完整的一组，比自己一首首挑省事得多。
+ */
+export async function searchNeteaseAlbums(
+  keyword: string,
+  limit: number = MAX_SEARCH_LIMIT,
+): Promise<NeteaseAlbumHit[]> {
+  const trimmed = keyword.trim();
+  if (!trimmed) return [];
+
+  const count = Math.min(Math.max(1, Math.trunc(limit)), MAX_SEARCH_LIMIT);
+  const url = new URL("https://music.163.com/api/search/get/web");
+  url.searchParams.set("s", trimmed);
+  // 10 = 专辑
+  url.searchParams.set("type", "10");
+  url.searchParams.set("limit", String(count));
+  url.searchParams.set("offset", "0");
+
+  const response = await fetch(url, {
+    headers: NET_EASE_HEADERS,
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`搜索接口返回 ${response.status}`);
+
+  const data = (await response.json()) as {
+    result?: {
+      albums?: {
+        id?: number;
+        name?: string;
+        size?: number;
+        publishTime?: number;
+        picUrl?: string;
+        artist?: { name?: string };
+      }[];
+    };
+  };
+
+  // 搜不到时 `result` 整个不存在，两级都要 `?.`（和 searchNetease 一样）
+  return (data.result?.albums ?? []).flatMap((album) => {
+    const id =
+      typeof album.id === "number" && album.id > 0 ? String(album.id) : "";
+    if (!id) return [];
+
+    return [
+      {
+        id,
+        name: (album.name ?? "").trim(),
+        artist: (album.artist?.name ?? "").trim(),
+        size: Number(album.size) > 0 ? Number(album.size) : 0,
+        publishTime: Number(album.publishTime) > 0 ? Number(album.publishTime) : 0,
+        cover: (album.picUrl ?? "").trim(),
+      },
+    ];
+  });
+}
+
+/** 一张专辑的详情（含曲目），给后台"整个加为歌单"用 */
+export type NeteaseAlbumDetail = {
+  id: string;
+  name: string;
+  artist: string;
+  /** 曲目。字段和搜歌结果对齐，直接就是能存进歌单的形状 */
+  tracks: NeteaseSearchHit[];
+  error?: string;
+};
+
+/**
+ * 取专辑曲目。
+ *
+ * 用的是 `/api/v1/album/{id}` —— 和 `api/v3/song/detail` 一样属于
+ * "带上 UA 和 Referer 就能读"的那批接口，不需要登录、不需要加密。
+ *
+ * **只发一次请求**（不像 `fetchNeteaseSongs` 那样按 id 逐个补）：专辑详情
+ * 本来就是一次性把曲目全给你的。
+ */
+export async function fetchNeteaseAlbum(
+  id: string,
+): Promise<NeteaseAlbumDetail> {
+  const albumId = id.trim();
+  if (!albumId) return { id: "", name: "", artist: "", tracks: [] };
+
+  const response = await fetch(
+    `https://music.163.com/api/v1/album/${encodeURIComponent(albumId)}`,
+    { headers: NET_EASE_HEADERS, signal: AbortSignal.timeout(10000) },
+  );
+  if (!response.ok) {
+    return {
+      id: albumId,
+      name: "",
+      artist: "",
+      tracks: [],
+      error: `接口返回 ${response.status}`,
+    };
+  }
+
+  const data = (await response.json()) as {
+    album?: { name?: string; artist?: { name?: string } };
+    songs?: {
+      id?: number;
+      name?: string;
+      fee?: number;
+      dt?: number;
+      ar?: { name?: string }[];
+    }[];
+  };
+
+  const albumName = (data.album?.name ?? "").trim();
+  const tracks: NeteaseSearchHit[] = (data.songs ?? []).flatMap((song) => {
+    const songId =
+      typeof song.id === "number" && song.id > 0 ? String(song.id) : "";
+    if (!songId) return [];
+
+    return [
+      {
+        id: songId,
+        name: (song.name ?? "").trim(),
+        // 多歌手用 " / " 连起来，和 searchNetease 保持一致
+        artist: (song.ar ?? [])
+          .map((item) => item.name)
+          .filter(Boolean)
+          .join(" / "),
+        album: albumName,
+        duration: Number(song.dt) > 0 ? Number(song.dt) : 0,
+        fee: Number(song.fee) > 0 ? Number(song.fee) : 0,
+        cover: `/api/admin/music/cover?id=${songId}`,
+      },
+    ];
+  });
+
+  return {
+    id: albumId,
+    name: albumName,
+    artist: (data.album?.artist?.name ?? "").trim(),
+    tracks,
+  };
+}
