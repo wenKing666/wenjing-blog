@@ -177,6 +177,7 @@ export default async function AdminDashboard({
   const configIssues = [
     !settings.siteUrl && { text: "站点地址 siteUrl 没填 —— RSS 与 sitemap 会直接不可用", href: "/admin/settings" },
     !settings.icp?.name && { text: "备案号没填 —— 备案通过后必须挂在页脚", href: "/admin/settings" },
+    !settings.police?.name && { text: "公安联网备案号没填 —— 同样要求挂在页脚", href: "/admin/settings" },
     !settings.avatar && { text: "还没设置头像 —— 开屏和名片会退化成名字首字", href: "/admin/settings" },
     !settings.social.github && !settings.social.email && { text: "还没填任何联系方式", href: "/admin/settings" },
   ].filter(Boolean) as { text: string; href: string }[];

@@ -56,6 +56,7 @@ function mergeSettings(raw: unknown): SiteSettings {
         ? input.themeColors.filter((s): s is string => typeof s === "string")
         : DEFAULT_SETTINGS.themeColors,
     icp: input.icp && typeof input.icp === "object" ? input.icp : null,
+    police: input.police && typeof input.police === "object" ? input.police : null,
     avatarHistory: Array.isArray(input.avatarHistory)
       ? input.avatarHistory
           .filter((item): item is string => typeof item === "string")

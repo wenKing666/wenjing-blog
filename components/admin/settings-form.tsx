@@ -772,7 +772,55 @@ export function SettingsForm({
               className={inputClass}
             />
           </div>
+
+          <div>
+            <label htmlFor="police-name" className={labelClass}>
+              公安联网备案号
+            </label>
+            <input
+              id="police-name"
+              value={form.police?.name ?? ""}
+              onChange={(event) =>
+                set(
+                  "police",
+                  event.target.value
+                    ? {
+                        name: event.target.value,
+                        link: form.police?.link ?? "",
+                      }
+                    : null,
+                )
+              }
+              placeholder="留空则不显示，如：冀公网安备13043002000123号"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="police-link" className={labelClass}>
+              公安备案链接
+            </label>
+            <input
+              id="police-link"
+              value={form.police?.link ?? ""}
+              onChange={(event) =>
+                set("police", {
+                  name: form.police?.name ?? "",
+                  link: event.target.value,
+                })
+              }
+              placeholder="https://beian.mps.gov.cn/#/query/webSearch?code=13043002000123"
+              className={inputClass}
+            />
+          </div>
         </div>
+
+        <p className={hintClass}>
+          公安那一栏填好后，页脚会连同公安部的官方标识一起显示。标识图存在本站
+          {" "}
+          <code>public/gongan-beian.png</code>
+          {" "}
+          （不热链公安部站点，免得每次开页都向那边发一个跨域请求）。链接填公安备案平台给的查询地址。
+        </p>
       </Section>
     </div>
   );

@@ -152,6 +152,14 @@ export type SiteSettings = {
   themeColors: string[];
   social: SocialLinks;
   icp: { name: string; link: string } | null;
+  /**
+   * 公安联网备案。和 icp 同样是 { 备案号, 链接 }。
+   *
+   * 页脚会配上公安部的官方标识（图已经存在本站 public/ 下，
+   * 不去热链 beian.mps.gov.cn —— 每次开页都向政府站点发一个跨域请求，
+   * 既慢又没必要，那边换图或挡掉热链我们这边就只剩一个破图）。
+   */
+  police: { name: string; link: string } | null;
   /** 友链申请格式，给访客一键复制 */
   friendApplyFormat: string;
   effects: SiteEffects;
@@ -243,6 +251,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     bilibili: "",
   },
   icp: null,
+  police: null,
   friendApplyFormat:
     "名称：我的博客\n简介：一句话介绍\n链接：https://example.com\n头像：https://example.com/avatar.jpg",
   effects: {
