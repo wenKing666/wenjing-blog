@@ -158,6 +158,56 @@ if (fs.existsSync(summaryPath)) {
 /* ---------- 逐篇处理 ---------- */
 
 /**
+ * GitBook 的提示块：
+ *
+ *   {% hint style="warning" %}
+ *   正文，可以是多段、列表、代码
+ *   {% endhint %}
+ *
+ * 原样留着的话页面上会直接显示这两行模板标记（线上就出现过）。
+ * 这里转成 GitHub 的 alert 写法（> [!WARNING]），交给渲染管线里的
+ * rehypeCallouts 变成带色块的提示框 —— 用引用块承载正文，
+ * 里面的列表和代码仍然按 Markdown 正常解析。
+ */
+function convertHints(text) {
+  const STYLE_TO_TYPE = {
+    info: "NOTE",
+    success: "TIP",
+    tip: "TIP",
+    warning: "WARNING",
+    danger: "CAUTION",
+  };
+
+  const lines = text.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const open = lines[i].match(/^\{%\s*hint\s+style="([^"]*)"\s*%\}\s*$/);
+    if (!open) {
+      out.push(lines[i]);
+      continue;
+    }
+
+    const type = STYLE_TO_TYPE[open[1]] || "NOTE";
+    const body = [];
+    i += 1;
+    while (i < lines.length && !/^\{%\s*endhint\s*%\}\s*$/.test(lines[i])) {
+      body.push(lines[i]);
+      i += 1;
+    }
+
+    // 去掉提示块头尾的空行，否则引用块里会多出几行空白
+    while (body.length && body[0].trim() === "") body.shift();
+    while (body.length && body[body.length - 1].trim() === "") body.pop();
+
+    out.push(`> [!${type}]`);
+    for (const line of body) out.push(line === "" ? ">" : `> ${line}`);
+    out.push("");
+  }
+
+  return out.join("\n");
+}
+
+/**
  * GitBook 的语言切换行。中文页上是
  *   [English](../en/events.md)
  * 或是
@@ -224,6 +274,7 @@ for (const [absFile, key] of keyBySource) {
   // 再 trim 一次：上一步的正则匹配到行尾、但把换行留了下来，
   // 开头多出一个 \n 就够让下面的 ^# 匹配不上。
   body = stripLanguageSwitch(body).trimStart();
+  body = convertHints(body);
 
   // 一级标题挪到 frontmatter 里，正文从下一个标题开始，避免页面上出现两个标题
   const h1 = body.match(/^#\s+(.+)$/m);
@@ -267,6 +318,7 @@ if (fs.existsSync(readmeSrc)) {
   const { body: afterFm } = parseFrontmatter(read(readmeSrc));
   let body = afterFm.replace(/\r\n/g, "\n").trimStart();
   body = stripLanguageSwitch(body).trimStart();
+  body = convertHints(body);
   body = body.replace(/^#\s+.+\n+/, "");
   body = rewriteLinks(body, readmeSrc);
   overview = body.trim();

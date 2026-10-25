@@ -22,7 +22,7 @@ import { renderMarkdown, type RenderResult } from "./render";
  */
 
 /** 渲染管线版本。改了 render.ts 的产物结构就要加一，让旧缓存失效。 */
-const RENDER_VERSION = 2;
+const RENDER_VERSION = 3;
 
 function cacheDir(): string {
   return path.join(contentRoot(), ".cache", "render");

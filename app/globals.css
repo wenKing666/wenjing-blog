@@ -655,6 +655,75 @@
 .prose blockquote p::before,
 .prose blockquote p::after { content: none; }
 
+/*
+ * 文档里的提示框（GitBook 的 hint 转换而来，源语法是 > [!WARNING]）。
+ *
+ * 它本身就是一个 blockquote —— 正文因此仍然是正常的 Markdown（列表、代码都能用），
+ * 这里只是把它重新画成一个带左边色条和浅色底的块。
+ * 比默认引用块多一条强调色和一个小标题，扫长文档时更容易被看见。
+ */
+.prose .callout {
+  --callout-color: var(--color-jade);
+  --callout-bg: rgb(13 148 136 / 0.06);
+  margin: 1.75rem 0;
+  padding: 0.85rem 1.1rem;
+  border-left: 3px solid var(--callout-color);
+  border-radius: 0 var(--radius-tile) var(--radius-tile) 0;
+  background: var(--callout-bg);
+  color: var(--color-ink-soft);
+}
+
+.prose .callout-warning {
+  --callout-color: #b45309;
+  --callout-bg: rgb(180 83 9 / 0.07);
+}
+
+.prose .callout-danger {
+  --callout-color: #b91c1c;
+  --callout-bg: rgb(185 28 28 / 0.07);
+}
+
+.dark .prose .callout {
+  --callout-color: var(--color-jade-pale);
+  --callout-bg: rgb(45 212 191 / 0.09);
+  color: #cbd5e1;
+}
+
+.dark .prose .callout-warning {
+  --callout-color: #fbbf24;
+  --callout-bg: rgb(251 191 36 / 0.1);
+}
+
+.dark .prose .callout-danger {
+  --callout-color: #f87171;
+  --callout-bg: rgb(248 113 113 / 0.1);
+}
+
+.prose .callout-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--callout-color);
+}
+
+.prose .callout-title::before {
+  content: "";
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.45rem;
+  border-radius: 999px;
+  background: currentColor;
+  vertical-align: middle;
+}
+
+.prose .callout > :first-child { margin-top: 0; }
+.prose .callout > :last-child { margin-bottom: 0; }
+.prose .callout p { margin: 0.45rem 0; }
+.prose .callout ul,
+.prose .callout ol { margin: 0.5rem 0; }
+
 .prose pre {
   background-color: #0d1416;
   color: #b8c4c4;

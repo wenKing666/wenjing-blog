@@ -40,6 +40,90 @@ function walkElements(node: HastNode, visit: (n: HastNode) => void): void {
   for (const child of node.children ?? []) walkElements(child, visit);
 }
 
+/** GitHub alert 的标记 -> 中文标题与配色。没有列出的一律不动。 */
+const CALLOUT_META: Record<string, { label: string; tone: string }> = {
+  NOTE: { label: "提示", tone: "info" },
+  TIP: { label: "技巧", tone: "info" },
+  IMPORTANT: { label: "重要", tone: "warning" },
+  WARNING: { label: "注意", tone: "warning" },
+  CAUTION: { label: "警告", tone: "danger" },
+};
+
+/**
+ * 把 `> [!WARNING]` 这种 GitHub alert 变成带色块的提示框。
+ *
+ * 文档是从 GitBook 搬来的，那边用 `{% hint %}` 写提示块，转换脚本会把它们
+ * 改写成 GitHub 的 alert 语法 —— 好处是正文仍然是**引用块里的正常 Markdown**，
+ * 列表、代码、行内代码照常解析，不需要把 HTML 塞进 Markdown（那样里面的
+ * Markdown 就不会被渲染了）。
+ *
+ * 必须排在 rehype-sanitize 之后：这里要加 class 和标题节点，
+ * 放前面会被白名单洗掉。
+ */
+function rehypeCallouts() {
+  return (tree: HastNode) => {
+    const walk = (node: HastNode) => {
+      if (!node.children) return;
+
+      node.children = node.children.map((child) => {
+        if (child.type === "element" && child.tagName === "blockquote") {
+          /*
+           * ★ 不能直接取 children[0]：引用块里第一个子节点常常是换行产生的
+           * **文本节点 "\n"**，而不是 <p>。要往后找第一个元素节点。
+           * （这个问题让提示框一开始完全没生效，而且不报错。）
+           */
+          const children = child.children ?? [];
+          const first = children.find((sub) => sub.type === "element");
+          if (first && first.type === "element" && first.tagName === "p") {
+            const marker = collectText(first).match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/);
+            if (marker) {
+              const meta = CALLOUT_META[marker[1]];
+
+              // 标记可能落在第一个文本节点里，也可能被拆开；深度优先找一次
+              const strip = (target: HastNode): boolean => {
+                if (target.type === "text" && typeof target.value === "string") {
+                  const at = target.value.indexOf(marker[0]);
+                  if (at >= 0) {
+                    target.value = target.value.slice(at + marker[0].length);
+                    return true;
+                  }
+                }
+                for (const sub of target.children ?? []) {
+                  if (strip(sub)) return true;
+                }
+                return false;
+              };
+              strip(first);
+
+              // 标记独占一行时，第一段会变成空段落，删掉它（按引用删，不能假设它在第 0 个）
+              if (collectText(first).trim() === "" && (first.children?.length ?? 0) === 0) {
+                child.children = children.filter((sub) => sub !== first);
+              }
+
+              child.properties = {
+                ...(child.properties ?? {}),
+                className: ["callout", `callout-${meta.tone}`],
+              };
+              children.unshift({
+                type: "element",
+                tagName: "p",
+                properties: { className: ["callout-title"] },
+                children: [{ type: "text", value: meta.label }],
+              });
+              child.children = children;
+            }
+          }
+        }
+
+        walk(child);
+        return child;
+      });
+    };
+
+    walk(tree);
+  };
+}
+
 /** 内容里换行有语义的标签，遍历时要整棵跳过。 */
 const VERBATIM_TAGS = new Set(["pre", "code"]);
 
@@ -198,6 +282,7 @@ export function renderMarkdown(source: string): RenderResult {
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
     .use(rehypeSanitize, schema)
+    .use(rehypeCallouts)
     .use(rehypeTableWrap)
     .use(rehypeHeadingAnchors)
     // katex 与 highlight 都排在净化之后：它们生成的是可信内容，
