@@ -141,6 +141,37 @@ export function renderMarkdown(source: string): RenderResult {
   }
 
   /**
+   * 给表格套一层滚动容器。
+   *
+   * 原来是在 CSS 里给 table 直接写 `display:block; overflow-x:auto`，
+   * 桌面看着没问题，但窄屏上表格的**布局溢出仍然会撑大页面** ——
+   * 浏览器对 table 元素上的 overflow 处理不可靠，子元素照样参与文档宽度计算，
+   * 结果整页能横向拖动几百像素（实测 390 宽的视口，文档宽 789）。
+   *
+   * 套一个 div 才是可靠做法：普通块级容器的 overflow 一定能裁住。
+   */
+  function rehypeTableWrap() {
+    return (tree: HastNode) => {
+      const wrap = (node: HastNode) => {
+        if (!node.children) return;
+        node.children = node.children.map((child) => {
+          if (child.type === "element" && child.tagName === "table") {
+            return {
+              type: "element",
+              tagName: "div",
+              properties: { className: ["table-scroll"] },
+              children: [child],
+            } as HastNode;
+          }
+          wrap(child);
+          return child;
+        });
+      };
+      wrap(tree);
+    };
+  }
+
+  /**
    * rehype-raw 为了让重新解析后的节点还能对上原始行号，会在块级元素之间补一串换行，
    * 一个表格前面能凭空多出 14 个 \n。视觉上无害（HTML 会折叠空白），但白白让每个页面变大。
    * 这里在最后收一次，跳过 <pre>/<code> —— 那里的换行是有语义的。
@@ -167,6 +198,7 @@ export function renderMarkdown(source: string): RenderResult {
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
     .use(rehypeSanitize, schema)
+    .use(rehypeTableWrap)
     .use(rehypeHeadingAnchors)
     // katex 与 highlight 都排在净化之后：它们生成的是可信内容，
     // 不该被 schema 折腾（KaTeX 的输出元素多到没法维护白名单）。

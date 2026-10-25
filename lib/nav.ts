@@ -19,6 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/moments", label: "说说" },
   { href: "/timeline", label: "归档" },
   { href: "/projects", label: "项目" },
+  { href: "/docs", label: "文档" },
   { href: "/photowall", label: "照片墙" },
   { href: "/music", label: "音乐" },
   { href: "/friends", label: "友链" },

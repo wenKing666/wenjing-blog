@@ -586,7 +586,16 @@
 /* ==================================================================
  * 正文排版
  * ================================================================== */
-.prose { --tw-prose-links: var(--color-jade); }
+.prose {
+  --tw-prose-links: var(--color-jade);
+  /*
+   * 文档里到处是 `FarmersDelightCollectLiveDisplaysEvent` 这种超长标识符，
+   * 标题里也会出现。默认只在空格处折行，一行就能把手机版面撑出横向滚动
+   * （实测 390 宽的视口被一个 h2 撑到 525）。
+   * anywhere 只在"这个词放不下"时才断，中文正常换行不受影响。
+   */
+  overflow-wrap: anywhere;
+}
 
 .dark .prose {
   --tw-prose-body: #cbd5e1;
@@ -663,6 +672,11 @@
   border-radius: 0.3rem;
   font-weight: 600;
   font-size: 0.86em;
+  /*
+   * 文档里到处是 `FarmersDelightCollectLiveDisplaysEvent` 这种长标识符，
+   * 默认只在空格处断行，一行就能把手机版面撑破。允许在任意字符处折行。
+   */
+  overflow-wrap: anywhere;
 }
 .dark .prose :not(pre) > code {
   background-color: rgb(45 212 191 / 0.14);
@@ -680,9 +694,24 @@
   height: auto;
 }
 
-.prose table {
-  display: block;
+/*
+ * 表格。外面那层 .table-scroll 是 render.ts 里的 rehypeTableWrap 套上去的。
+ *
+ * 不能再给 table 自己写 display:block + overflow-x:auto ——
+ * 窄屏上子元素仍然参与文档宽度计算，整页会被撑出几百像素的横向滚动。
+ * 普通块级容器的 overflow 才裁得住。
+ */
+.prose .table-scroll {
+  margin: 1.75rem 0;
   overflow-x: auto;
+  border-radius: var(--radius-tile);
+  -webkit-overflow-scrolling: touch;
+}
+
+.prose .table-scroll table {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
   white-space: nowrap;
 }
 

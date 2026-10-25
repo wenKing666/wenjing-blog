@@ -21,6 +21,9 @@ import { renderMarkdown, type RenderResult } from "./render";
  * 删了只会让下次访问慢一点，不会有任何数据损失。
  */
 
+/** 渲染管线版本。改了 render.ts 的产物结构就要加一，让旧缓存失效。 */
+const RENDER_VERSION = 2;
+
 function cacheDir(): string {
   return path.join(contentRoot(), ".cache", "render");
 }
@@ -35,7 +38,18 @@ export async function renderMarkdownCached(
   key: string,
   source: string,
 ): Promise<RenderResult> {
-  const hash = createHash("sha1").update(source).digest("hex");
+  /*
+   * ★ 渲染管线版本号，必须掺进缓存键。
+   *
+   * 缓存只按**正文内容**算哈希 —— 换了渲染逻辑（比如给表格套滚动容器）
+   * 而正文一字未改时，旧缓存依然算"命中"，页面会一直拿旧 HTML。
+   * 这次就踩到了：改完 rehype 插件，刷新看到的还是没套容器的版本。
+   *
+   * 以后动 render.ts 就把它 +1。
+   */
+  const hash = createHash("sha1")
+    .update(`${RENDER_VERSION}\0${source}`)
+    .digest("hex");
   const file = cacheFile(key);
 
   try {
