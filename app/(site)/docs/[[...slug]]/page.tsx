@@ -442,6 +442,25 @@ async function OverviewBody({ overview }: { overview: string }) {
   );
 }
 
+/**
+ * 按空行把许可证切成段落，段内把硬换行折成空格。
+ * 只改变空白，不改变任何一个字 —— 原文的 80 列硬换行是给纯文本终端看的，
+ * 放进网页只会让右侧空出一大片（这次就被指出来了）。
+ */
+function licenseParagraphs(text: string): string[] {
+  return text
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((block) =>
+      block
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join(" "),
+    )
+    .filter(Boolean);
+}
+
 async function DocsLicense({ meta }: { meta: Awaited<ReturnType<typeof getDocsMeta>> }) {
   const license = await getDocsLicense();
   if (!license) notFound();
@@ -467,7 +486,7 @@ async function DocsLicense({ meta }: { meta: Awaited<ReturnType<typeof getDocsMe
               href={meta.source.repo}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-jade dark:hover:text-jade-pale"
+              className="break-all hover:text-jade dark:hover:text-jade-pale"
             >
               {meta.source.repo}
             </a>
@@ -475,10 +494,21 @@ async function DocsLicense({ meta }: { meta: Awaited<ReturnType<typeof getDocsMe
         )}
       </header>
 
-      <div className="reveal glass-xl mt-8 p-5 sm:p-7">
-        <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words font-mono text-[0.6875rem] leading-relaxed text-ink-soft dark:text-slate-400">
-          {license}
-        </pre>
+      {/*
+        许可证正文。
+        
+        不能直接用 <pre> + overflow-auto 铺 80 列的原文：GPL 是硬换行到约 80 列的，
+        11px 等宽算下来只有 500 多像素宽，放在近 900 像素的面板里，右边会空出一大片；
+        再加上容器自身带滚动条，那道空白就特别扎眼。
+        这里按空行切段、段内把换行折叠成空格 —— 只动空白，一个词都不改 ——
+        文字就能铺满整行，也不再有内部滚动条。
+      */}
+      <div className="reveal glass-xl mt-8 p-6 sm:p-8">
+        <div className="space-y-4 font-mono text-[0.8125rem] leading-[1.9] text-ink-soft dark:text-slate-400">
+          {licenseParagraphs(license).map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+        </div>
       </div>
 
       <p className="mt-6">
